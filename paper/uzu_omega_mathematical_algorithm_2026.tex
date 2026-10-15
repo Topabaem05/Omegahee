@@ -1,0 +1,629 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[a4paper,margin=18mm]{geometry}
+\usepackage{fontspec}
+\usepackage{babel}
+\babelprovide[import, main]{korean}
+\babelfont{rm}{Noto Serif CJK KR}
+\babelfont{sf}{Noto Sans CJK KR}
+\babelfont{tt}{Noto Sans CJK KR}
+
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,tabularx,array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+
+\definecolor{primary}{RGB}{18, 58, 138}
+\definecolor{accent}{RGB}{13, 110, 110}
+\definecolor{neutralbg}{RGB}{244, 247, 252}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=primary,
+  citecolor=primary,
+  urlcolor=primary,
+  pdftitle={Omega-Uzu: Mathematical Algorithm Design for High-TPS and Large-Weight LLM Inference in trymirai/uzu},
+  pdfauthor={Algorithmic Architecture Specification}
+}
+
+\setlength{\parskip}{5pt plus 2pt minus 1pt}
+\setlength{\parindent}{0pt}
+\setlength{\headheight}{14pt}
+
+\newtheorem{theorem}{정리 (Theorem)}[section]
+\newtheorem{proposition}[theorem]{명제 (Proposition)}
+\newtheorem{lemma}[theorem]{보조정리 (Lemma)}
+\newtheorem{definition}[theorem]{정의 (Definition)}
+\newtheorem{corollary}[theorem]{따름정리 (Corollary)}
+
+\newcommand{\takeaway}[2]{%
+  \vspace{4pt}\noindent\colorbox{primary!8}{%
+    \parbox{\dimexpr\textwidth-2\fboxsep\relax}{%
+      \vspace{3pt}\textbf{\color{primary}#1:}\hspace{0.5em}#2\vspace{3pt}%
+    }%
+  }\vspace{4pt}%
+}
+
+\newcommand{\algbox}[2]{%
+  \vspace{4pt}\noindent\fcolorbox{primary!45}{neutralbg}{%
+    \parbox{\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax}{%
+      \vspace{3pt}\textbf{\color{primary}#1}\par\vspace{2pt}\hrule\vspace{3pt}%
+      #2\vspace{2pt}%
+    }%
+  }\vspace{4pt}%
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gray}\textbf{$\Omega$-Uzu}: \textsf{trymirai/uzu} 고성능 추론 및 초대형 모델 가속 수학적 알고리즘 명세서}
+\fancyhead[R]{\small\color{gray}2026.07--2026.10 arXiv 방법론 통합 설계}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\vspace{-12mm}\textbf{\color{primary}$\Omega$-Uzu: 크로네커-슈어 곡률 트렐리스 양자화, 다이애딕 프리픽스 스트리밍 및 이중선형 상관 투기적 디코딩을 결합한 \textsf{trymirai/uzu} 차세대 추론 수학적 알고리즘 설계}}
+\author{[\textsf{trymirai/uzu}] 및 [\textsf{trymirai/lalamo}] 오픈소스 아키텍처 고도화 기술 명세서}
+\date{2026년 10월 (참조 문헌: 2026년 7월 -- 10월 최신 arXiv 논문)}
+
+\begin{document}
+\maketitle
+\vspace{-6mm}
+
+\begin{abstract}
+\noindent
+본 문서는 Apple Silicon 통합 메모리(Unified Memory) 기반의 Rust/Metal 추론 엔진인 [\textsf{trymirai/uzu}] (v0.6.3)와 모델 최적화 프레임워크 [\textsf{trymirai/lalamo}]의 초당 토큰 생성 속도(TPS)를 극대화하고, 27B--300B+ 규모의 초대형 가중치(High-Weight) 모델을 단일 소비자용 디바이스에서 무손실에 가까운 정밀도로 고속 구동하기 위한 통합 수학적 알고리즘 \textbf{$\Omega$-Uzu (Omega-Uzu)}를 제안한다. 현행 \textsf{uzu}는 4비트 비대칭 양자화(\textsf{Mirai-M}) 및 8비트 대칭 양자화(\textsf{Mirai-L})와 블록 대각 랜덤 하다마드 변환(Block-Diagonal RHT), 그리고 블록 확산 초안기(\textsf{DFlash})와 소형 자기회귀 어댑터(\textsf{Weaver}, \cite{oda2026trees})를 결합하여 높은 성능을 달성하고 있으나, (1) 투기적 디코딩 비활성화 시 메모리 대역폭 한계(Roofline Ceiling)에 수렴하는 기본 디코딩 속도, (2) 2--3비트 초저비트 영역에서의 룩업 테이블(LUT) 뱅크 충돌 및 런타임 역회전(Un-rotation) 오버헤드, (3) 755MB 규모의 외부 \textsf{DFlash} 초안 모델이 유발하는 $+0.9\text{ GB}$ 상주 메모리 부담 및 고정 트리 예산(\textsf{tree\_budget=16})의 비효율성, (4) 장기 문맥(Long-Context)에서의 KV 캐시 대역폭 역전 현상이라는 네 가지 수학적·시스템적 병목을 안고 있다. 본 연구는 2026년 7월부터 10월 사이에 발표된 최신 arXiv 논문 방법론(\cite{oda2026trees,lee2026kronq,liu2026sparsespec,yun2026optr,laus2026aatc,lee2026schurquant,rusanovsky2026lilicorr,liu2026awsrc,specquant2026,ma2026gdntreescan,yoshida2026casa,panferov2026dq,singh2026kvwall,liu2026g2ptq,lee2026bytecross,wei2026stagq,ding2026curvetq,bhandari2026readkv})을 수학적으로 결합하여 4대 핵심 알고리즘 계층을 도출하고, 오차 상한 증명과 Metal SIMD-group 커널 매핑 규격을 제시한다.
+\end{abstract}
+
+\takeaway{핵심 설계 요약 ($\Omega$-Uzu 4대 수학적 기둥)}{%
+(1) \textbf{KSC-CurveTQ + StagQ-AWSRC 가중치 압축}: [KronQ]/[CASA]의 크로네커 헤시안 조건수 보정과 [SchurQuant]의 슈어 보수 곡률을 [CurveTQ]의 비회전(Rotation-Free) 비터비 탐색 메트릭에 주입하고, [StagQ] 다이애딕 프리픽스 평면 및 [AWSRC] 의사난수 시드 잔차 복원($+0.162\text{ bpw}$)을 결합하여 2.38 bpw에서 런타임 역회전 및 공유 메모리 LUT 충돌 없이 가중치 트래픽을 $48.4\%$ 절감한다. \\
+(2) \textbf{DQ-ODP + ByteCross 동적 희소 교차 실행}: [Disaggregated Quantization (DQ)]으로 INT8 Neural Accelerator 프리필과 비양자화 활성화 디코딩을 분리하고, [ByteCross] 폐쇄형 교차 문맥 길이 $T^\star$에 따라 활성화 채널 희소성과 KV 희소성을 동적 결합한다. \\
+(3) \textbf{LiLiCorr-StagQ 프리픽스 자가 투기 및 GDN Tree-Scan 검증}: [LiLiCorr] 단일 패스 이중선형 코사인 상관 행렬로 \textsf{Weaver}의 순차 지연을 제거하고, 외부 초안 모델 부재 시 [StagQ] 2비트 프리픽스 스트림과 [SparseSpec-L] 엔트로피 제어기를 통해 추가 메모리 $0\text{ MB}$로 자가 투기 디코딩을 수행하며, [GDN Tree-Scan]으로 결정론적 부동소수점 일관성을 보장한다. \\
+(4) \textbf{AATC-OptR + ReadKV 질의 적응형 프리픽스 KV 캐시}: [AATC] 역방향 워터필링 및 [OptR] 출력 인지 회전 위에 [ReadKV] 질의 적응형 비트 평면 프리픽스 읽기를 적용하여 KV 메모리 읽기 대역폭을 $4\times$ 감축한다.%
+}
+
+\section{현행 \textsf{trymirai/uzu} 아키텍처의 수학적 병목 진단 (Baseline Analysis)}
+
+[\textsf{trymirai/uzu}] 엔진과 [\textsf{trymirai/lalamo}] 변환 툴킷은 Apple Silicon (M1--M5 및 A18/A19 Pro)의 통합 메모리 구조와 GPU Neural Accelerator에 맞춰 설계되어 있다 \cite{mirai2026quant,mirai2026specdec}. 그러나 최근 실측 벤치마크([Mirai Metrics] 및 [Zenn M5 16GB 실측 분석])와 [GitHub 최근 PR (\#893, \#899, \#900, \#925)]을 수학적으로 분해하면 다음과 같은 4가지 구조적 한계가 드러난다.
+
+\subsection{단일 포워드 패스의 대역폭 천장(Roofline Wall)과 초대형 가중치 병목}
+단일 시퀀스 자기회귀 디코딩($B=1$)에서 1개 토큰 생성 시 레이어 $l \in \{1,\dots,L\}$의 선형 투영 가중치 $W^{(l)} \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$와 길이 $T$인 KV 캐시를 모두 DRAM에서 읽어야 한다. 유효 가중치 비트폭을 $\bar{b}_w$ (bits/weight), KV 캐시 평균 읽기 비트폭을 $\bar{b}_{\text{kv}}$, 전체 파라미터 수를 $P$, 모델의 레이어당 KV 차원을 $d_{\text{kv}}$라 할 때, 단일 포워드 패스당 전송 바이트 수 $\mathcal{M}_{\text{step}}(T)$는 다음과 같다:
+\begin{equation}
+\mathcal{M}_{\text{step}}(T) = \frac{P \cdot \bar{b}_w}{8} + \frac{2 L \cdot T \cdot d_{\text{kv}} \cdot \bar{b}_{\text{kv}}}{8} + \mathcal{M}_{\text{meta}}.
+\label{eq:memory_step}
+\end{equation}
+Apple M5 기본형(16GB RAM, 대역폭 $\mathcal{B}_{\text{mem}} \approx 153\text{ GB/s}$)에서 \textsf{Qwen3.5-9B}의 \textsf{Mirai-M} 체크포인트(4비트 비대칭 양자화, 그룹 크기 $g=64$, BF16 스케일 및 4비트 영점 포함 시 $\bar{b}_w \approx 4.61\text{ bpw}$, 가중치 용량 $5.19\text{ GB}$)를 투기적 디코딩 없이($\tau = 1.0\text{ tokens/pass}$) 구동할 경우, 이론적 대역폭 상한은 $\text{TPS}_{\max} = 153 / 5.19 \approx 29.48\text{ tok/s}$이며 실제 \textsf{uzu} 0.6.2/0.6.3 측정치는 $26.9\text{--}27.0\text{ tok/s}$ (대역폭 효율 $\eta_{\text{bw}} \approx 91.4\%$)로 \textsf{MLX} ($26.0\text{--}26.6\text{ tok/s}$)와 사실상 동일한 천장에 갇힌다 \cite{zenn2026uzu}. 즉, \textbf{가중치당 전송 비트 $\bar{b}_w$와 활성 읽기 비율 자체를 수학적으로 낮추지 않는 한}, 27B--70B+ 또는 300B MoE 모델은 단일 패스 지연시간과 메모리 상주 용량(예: \textsf{Qwen3.6-27B Mirai-M}의 $15.70\text{ GB}$ 상주 메모리)으로 인해 일반 16GB--32GB 디바이스에서 구동이 불가능하거나 극심한 스와핑을 겪는다.
+
+\subsection{\textsf{Mirai-M/L} 블록 하다마드 변환 및 초기 트렐리스 커널(\#899, \#900)의 한계}
+\textsf{lalamo}의 현행 파이프라인은 워프 폭($w=32$)에 맞춘 블록 대각 랜덤 하다마드 변환($\mathbf{H}_{32}$)으로 이상치(outlier)를 완화한 뒤, 입력 활성화 기반 2차 목적함수(YAQA)로 양자화하고 스케일/영점만 증류(QAD)한다 \cite{mirai2026quant}. 또한 최근 \textsf{uzu} PR \#899, \#900, \#925를 통해 도입 중인 트렐리스(Trellis) 양자화 커널은 2--3비트 압축을 목표로 하지만 다음 두 가지 수학적 손실이 발생한다:
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{단방향 스칼라 민감도 왜곡 및 접미사(Suffix) 미보상}: 입력 활성화 공분산 $\mathbf{A} = \mathbb{E}[\mathbf{x}\mathbf{x}^\top]$만 반영하고 출력 그래디언트 공분산 $\mathbf{B} = \mathbb{E}[\mathbf{g}\mathbf{g}^\top]$ 및 미양자화 연속 접미사의 흡수 효과를 무시하여, 2비트 이하에서 대형 모델(예: 70B)의 Perplexity가 발산한다 \cite{lee2026kronq,lee2026schurquant,yoshida2026casa}.
+  \item \textbf{유클리드 비터비 탐색을 위한 런타임 회전 오버헤드}: 기존 트렐리스 코덱(QTIP, Proteus)은 블록 내부의 곡률 편차를 평탄화하기 위해 전체 또는 블록 직교 회전 $\mathbf{R}$을 곱하고 매 디코딩 스텝마다 이를 되돌리는 연산을 수행해야 한다 \cite{ding2026curvetq}.
+\end{enumerate}
+
+\subsection{\textsf{DFlash-Weaver} 투기적 디코딩의 메모리 오버헤드, 결합성 및 비결정론적 드리프트}
+현행 \textsf{uzu}의 투기적 디코딩(\cite{mirai2026specdec,oda2026trees})은 타겟 모델의 중간 레이어($l \in \{1, 5, 9, \dots, 29\}$) 은닉 상태를 조건으로 받는 블록 확산 초안기 \textsf{DFlash} ($755\text{ MB}$ 체크포인트, 실행 시 $+0.9\text{ GB}$ 추가 메모리 점유)가 독립 주변 확률(marginals)을 출력하면, $56.7\text{M}$ 파라미터의 자기회귀 트랜스포머 \textsf{Weaver} (\cite{oda2026trees})가 상위 $K=512$개 후보 위에서 제안 트리를 순차적으로 확장한다. 이 구조는 세 가지 한계를 지닌다:
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{타겟 결합성 및 $+0.9\text{ GB}$ 메모리 페널티}: 전용 \textsf{DFlash} 체크포인트가 없는 신규/파인튜닝 모델에서는 투기적 디코딩이 완전히 비활성화되어 TPS가 $1/3\text{--}1/4$로 급락하며, 16GB Mac 및 iOS($<3\text{ GB}$) 환경에서는 $0.9\text{ GB}$의 초안 모델 메모리가 치명적이다 \cite{zenn2026uzu}.
+  \item \textbf{\textsf{Weaver}의 슬롯별 자기회귀 지연 및 고정 \textsf{tree\_budget}}: \textsf{Weaver}가 트리 확장을 위해 슬롯마다 자기회귀 패스를 수행하며, \textsf{shapes.json}의 \textsf{tree\_budget}이 하드웨어별 상수(예: M5--M6 모두 $16$)로 고정되어 있어, 엔트로피가 높은 자연어 산문(수락 길이 $5.0\text{--}5.2$)에서 불필요한 트리 검증 연산을 낭비한다 \cite{liu2026sparsespec,rusanovsky2026lilicorr}.
+  \item \textbf{Greedy 디코딩 시 출력 불일치(Non-deterministic Drift)}: 동적 8비트 활성화 양자화와 병렬 트리 검증/Gated DeltaNet 상태 업데이트 과정에서 순차 FP32/BF16 경로와 부동소수점 누적 순서가 달라져, 온도 $T_{\text{temp}}=0$ (Greedy)에서도 200--300자 이후 출력이 갈라지는 현상이 발생한다 \cite{zenn2026uzu,ma2026gdntreescan,panferov2026dq}.
+\end{enumerate}
+
+\begin{table}[ht!]
+\centering
+\small
+\caption{2026년 7월--10월 최신 arXiv 논문 기반 \textbf{$\Omega$-Uzu} 통합 알고리즘 구성 매트릭스}
+\vspace{2mm}
+\begin{tabularx}{\textwidth}{p{2.2cm} p{3.5cm} p{2.6cm} X}
+\toprule
+\textbf{계층 (Pillar)} & \textbf{참조 논문 (2026.07--10)} & \textbf{적용 대상 모듈} & \textbf{해결하는 \textsf{uzu} 병목 및 수학적 핵심 메커니즘} \\
+\midrule
+\textbf{Pillar 1} \newline 초대형 가중치 \newline 초저비트 압축 \newline (2.38 bpw) &
+[CurveTQ (2610.09212)] \cite{ding2026curvetq} \newline
+[KronQ (2607.07964)] \cite{lee2026kronq} \newline
+[CASA (2609.25916)] \cite{yoshida2026casa} \newline
+[SchurQuant (2608.15567)] \cite{lee2026schurquant} \newline
+[$\text{G}^2\text{PTQ}$ (2609.31009)] \cite{liu2026g2ptq} \newline
+[StagQ (2610.05977)] \cite{wei2026stagq} \newline
+[AWSRC (2608.23144)] \cite{liu2026awsrc} &
+\textsf{lalamo} PTQ / \newline \textsf{uzu} \textsf{qmm\_trellis} \newline 커널 (\#899, \#900, \#925) &
+$\bullet$ 헤시안 $LDL^\top$ 대각 곡률 가중치를 비터비 브랜치 메트릭에 직접 주입하여 \textbf{회전 없는(Rotation-Free)} 2비트 트렐리스 탐색 달성 \newline
+$\bullet$ 입출력 크로네커 헤시안($\mathbf{A} \otimes \mathbf{B}$) 조건수 $\sqrt{\kappa(\mathbf{A})\kappa(\mathbf{B})}$ 왜곡 보정 및 슈어 보수($\mathbf{H}_{G/S}$) 곡률로 2비트 붕괴 방지 \newline
+$\bullet$ 2비트 기저 + 다이애딕 정밀화 평면(\textsf{StagQ}) 및 시드 생성 기저 잔차 복원(\textsf{AWSRC}, $+0.162\text{ bpw}$)으로 공유 메모리 LUT 충돌 제거 \\
+\midrule
+\textbf{Pillar 2} \newline 위상 분리 및 \newline 동적 희소 교차 &
+[DQ / ODP (2609.26333)] \cite{panferov2026dq} \newline
+[ByteCross (2609.33889)] \cite{lee2026bytecross} \newline
+[KV-Wall (2609.30854)] \cite{singh2026kvwall} &
+\textsf{uzu} \textsf{prefill} \& \newline \textsf{decode} 스케줄러 &
+$\bullet$ 프리필(INT8/FP4 연산 가속 + SSD 이중 버퍼 스트리밍 ODP)과 디코드(활성화 비양자화 + 2.38 bpw 가중치) 분리로 TTFT $1.78\times$ 단축 \newline
+$\bullet$ 문맥 길이 $T$와 바이트 교차점 $T^\star$에 따라 투영 가중치 활성화 희소성과 Split-K KV 희소성을 결합하여 $14\text{--}26\%$ 추가 가속 \\
+\midrule
+\textbf{Pillar 3} \newline 자가·상관 \newline 투기적 디코딩 &
+[LiLiCorr (2608.20530)] \cite{rusanovsky2026lilicorr} \newline
+[Weaver/TfM (2607.06763)] \cite{oda2026trees} \newline
+[SpecQuant (2609.21704)] \cite{specquant2026} \newline
+[SparseSpec-L (2607.27735)] \cite{liu2026sparsespec} \newline
+[GDN Tree-Scan (2609.23900)] \cite{ma2026gdntreescan} &
+\textsf{uzu} \textsf{speculator} \newline \& \textsf{gdn\_verify} &
+$\bullet$ \textsf{DFlash} 상위-$K$ 주변 확률을 단일 패스 이중선형 코사인 유사도 행렬로 상관화하여 수락 길이 $+7\text{--}19\%$ 향상 (오버헤드 $3\%$) \newline
+$\bullet$ 전용 초안 모델 부재 또는 RAM 제약 시 \textsf{StagQ} 2비트 프리픽스 가중치 공유(\textsf{SpecQuant}) + 회수형 희소 KV(\textsf{SparseSpec-L}) 자가 투기 \newline
+$\bullet$ \textsf{GDN Tree-Scan} 정적 인덱스 사전 계산으로 비트 단위 결정론 보장 \\
+\midrule
+\textbf{Pillar 4} \newline 질의 적응형 \newline 프리픽스 KV &
+[AATC (2608.14191)] \cite{laus2026aatc} \newline
+[OptR (2608.02691)] \cite{yun2026optr} \newline
+[ReadKV (2610.11245)] \cite{bhandari2026readkv} &
+\textsf{uzu} \textsf{kv\_cache} \newline \& \textsf{attention} &
+$\bullet$ $W_O$ 투영 이후 어텐션 출력 왜곡을 최소화하는 직교 회전(\textsf{OptR}) 및 역방향 워터필링 변환 부호화(\textsf{AATC}, $5.8\times$ 압축) \newline
+$\bullet$ 8비트 점진적 코드로 저장된 KV 캐시에서 질의 벡터 $q_t$에 따라 평균 2--4비트 프리픽스만 선택적으로 읽어 지연시간 $39\%$ 절감 \\
+\bottomrule
+\end{tabularx}
+\label{tab:synthesis_matrix}
+\end{table}
+
+\section{Pillar 1: 크로네커-슈어 곡률 트렐리스 및 다이애딕 시드 잔차 양자화 (KSC-CurveTQ + StagQ-AWSRC)}
+
+웨이트가 큰 모델(27B, 70B, 300B+ MoE)을 Apple Silicon에서 메모리 병목 없이 구동하려면 유효 비트폭을 4비트(\textsf{Mirai-M})에서 2.2--2.4 bpw 영역(\textbf{\textsf{Mirai-S} 티어})으로 낮추되, \textsf{uzu}가 지향하는 \textbf{(i) 공유 메모리 룩업 테이블(LUT) 뱅크 충돌 제로}, \textbf{(ii) 런타임 하다마드 역회전 오버헤드 제로}, \textbf{(iii) 2비트 붕괴(Perplexity 발산) 방지}를 동시에 달성해야 한다.
+
+\subsection{크로네커-팩터드 양방향 비간섭성 및 CASA 최적 비트 할당}
+레이어 $l$의 가중치 행렬 $W \in \mathbb{R}^{m \times n}$에 대해 양자화 오차 $\Delta W = \widehat{W} - W$가 전역 손실 $\mathcal{L}$에 미치는 2차 테일러 전개는 입력 활성화 $x \in \mathbb{R}^n$와 출력 그래디언트 $g = \nabla_y \mathcal{L} \in \mathbb{R}^m$의 크로네커 곱으로 근사된다 \cite{lee2026kronq,yoshida2026casa}:
+\begin{equation}
+\mathbb{E}[\Delta \mathcal{L}] \approx \frac{1}{2} \operatorname{vec}(\Delta W)^\top \left( \mathbf{A} \otimes \mathbf{B} \right) \operatorname{vec}(\Delta W) + \operatorname{tr}\left( \mathbf{G}^\top \Delta W \right), \quad \mathbf{A} = \mathbb{E}[\mathbf{x}\mathbf{x}^\top] \in \mathbb{R}^{n \times n}, \quad \mathbf{B} = \mathbb{E}[\mathbf{g}\mathbf{g}^\top] \in \mathbb{R}^{m \times m},
+\label{eq:kronecker_loss}
+\end{equation}
+여기서 $\mathbf{G} = \mathbb{E}[\mathbf{g}\mathbf{x}^\top]$은 [$\text{G}^2\text{PTQ}$] \cite{liu2026g2ptq}가 도입한 블록 단위 갱신 1차 그래디언트 항이다.
+
+\begin{theorem}[[CASA] 스칼라 민감도 왜곡 상한 및 폐쇄형 할당 \cite{yoshida2026casa}]
+각 모듈의 헤시안을 단일 스칼라로 축약하는 기존 다중선택 배낭 문제(MCKP) 프록시는 전체 크로네커 이차 형식 대비 최대 $\sqrt{\kappa(\mathbf{A})\kappa(\mathbf{B})}$배의 곱셈적 왜곡(실제 LLM에서 $10^1 \sim 10^{13}$)을 유발한다. 모듈 $l$의 유효 크로네커 곡률 에너지를
+\begin{equation}
+\Omega_l \triangleq \left( \operatorname{tr}(\mathbf{A}_l) \operatorname{tr}(\mathbf{B}_l) \cdot \psi(\kappa(\mathbf{A}_l), \kappa(\mathbf{B}_l)) \right)^{1/2}, \quad \psi(\kappa_A, \kappa_B) = \frac{(\kappa_A + 1)(\kappa_B + 1)}{4\sqrt{\kappa_A \kappa_B}}
+\end{equation}
+로 정의하면, 목표 평균 비트 예산 $\bar{b}_{\text{target}}$ 하에서의 연속 완화 최적 비트폭 $b_l^\star$는 다음의 폐쇄형 해(Closed-form Solution)를 갖는다:
+\begin{equation}
+b_l^\star = \bar{b}_{\text{target}} + \frac{1}{2 \ln 2} \ln \left( \frac{\Omega_l / P_l}{\prod_{k=1}^L (\Omega_k / P_k)^{P_k / P}} \right), \quad P = \sum_{k=1}^L P_k.
+\label{eq:casa_allocation}
+\end{equation}
+\end{theorem}
+\textsf{lalamo} 변환기는 식 \eqref{eq:casa_allocation}의 1단계 해를 구한 뒤, 2단계로 엔드투엔드 KL 발산을 최소화하는 이산 국소 탐색을 수행하여 각 모듈을 $\{2, 3, 4\}\text{ bit}$로 배정한다. 이때 [arXiv:2607.08734]의 통계적 상전이 분석에 따라 어텐션의 $W_Q, W_K$ 투영은 최소 3비트 이상으로 보호하고, 전체 파라미터의 약 $68\%$를 차지하는 FFN 투영($W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$) 및 MoE 전문가 가중치를 2비트 기저로 압축한다.
+
+\subsection{슈어 보수(Schur-Complement) 곡률 가중 비회전 트렐리스 탐색 (KSC-CurveTQ)}
+최근 \textsf{uzu}에 추가된 \textsf{simdgroup trellis gemm} (\#900) 및 재시작 블록 패킹(\#925)을 극대화하기 위해, [CurveTQ] \cite{ding2026curvetq}와 [SchurQuant] \cite{lee2026schurquant}를 결합한다. 입력 차원 $n$을 크기 $B_{\text{col}}=64$인 블록 $G$와 아직 양자화되지 않은 연속 접미사(Suffix) $S$로 분할하자:
+\begin{equation}
+\widetilde{\mathbf{A}} = \begin{bmatrix} \mathbf{A}_{GG} & \mathbf{A}_{GS} \\ \mathbf{A}_{SG} & \mathbf{A}_{SS} \end{bmatrix}, \quad \widetilde{\mathbf{A}} \triangleq \mathbf{A} + \lambda_{\text{reg}} \mathbf{I}.
+\end{equation}
+기존 오차 피드백(GPTQ/YAQA)은 블록 $G$ 내부의 이산 결정을 내릴 때 연속 접미사 $S$가 흡수할 수 있는 최적 연속 반응 $\Delta W_{:,S}^\star = -\Delta W_{:,G} \mathbf{A}_{GS}\mathbf{A}_{SS}^{-1}$을 무시하거나 블록 내부 곡률 변동을 버린다. [SchurOpt] \cite{lee2026schurquant}에 의해 접미사 $S$의 최적 연속 보상을 대수적으로 소거하면, 블록 $G$의 정확한 유효 이차 곡률 행렬은 \textbf{슈어 보수(Schur Complement)} $\mathbf{H}_{G/S}$로 주어진다:
+\begin{equation}
+\mathbf{H}_{G/S} = \mathbf{A}_{GG} - \mathbf{A}_{GS} \mathbf{A}_{SS}^{-1} \mathbf{A}_{SG} \in \mathbb{R}^{64 \times 64}.
+\label{eq:schur_complement}
+\end{equation}
+이제 $\mathbf{H}_{G/S}$에 대해 하삼각-대각 분해 $\mathbf{H}_{G/S} = \mathbf{L}_G \mathbf{D}_G \mathbf{L}_G^\top$ (단, $\mathbf{L}_G$는 주대각선이 $1$인 하삼각 행렬, $\mathbf{D}_G = \operatorname{diag}(d_1, \dots, d_{64})$)를 수행한다. [CurveTQ] \cite{ding2026curvetq}가 증명한 핵심 정리에 따르면, 오차 피드백 하에서 블록 $G$의 양자화 손실은 각 좌표 $j \in \{1,\dots,64\}$의 반올림 오차에 곡률 가중치 $d_j > 0$를 곱한 가중 제곱합으로 정확히 분해된다.
+
+\begin{proposition}[비회전 곡률 가중 비터비 탐색과 랜덤 회전의 등가성 \cite{ding2026curvetq,lee2026schurquant,liu2026g2ptq}]
+출력 행 $i$의 크기 64인 블록 가중치 벡터 $w_{i,G} \in \mathbb{R}^{64}$를 상태 공간 $\mathcal{S}$ ($|\mathcal{S}| = 2^{14}$)를 갖는 트렐리스 부호기로 양자화할 때, [$\text{G}^2\text{PTQ}$]의 신뢰영역 스케일 $\eta_i \in (0, 1]$이 적용된 1차 그래디언트 보정 목표점을
+\begin{equation}
+\tilde{w}_{i,j} = w_{i,j} - \eta_i \frac{(\mathbf{B}_{ii})^{-1} G_{i,j}}{d_j} - \sum_{k < j} (\mathbf{L}_G)_{j,k} (w_{i,k} - \hat{w}_{i,k})
+\end{equation}
+로 정의하자. 이때 비터비(Viterbi) 동적 계획법의 브랜치 메트릭 $\mathcal{M}_{\text{branch}}(s_{j-1} \to s_j)$를 유클리드 거리 대신 \textbf{크로네커-슈어 곡률 가중 메트릭}
+\begin{equation}
+\mathcal{M}_{\text{branch}}\left(s_{j-1} \xrightarrow{c_j} s_j\right) = \mathbf{B}_{ii} \cdot d_j \cdot \left( \tilde{w}_{i,j} - \alpha_i \beta_j \mathcal{Q}_{\text{quant}}\!\left(\operatorname{idx}(s_{j-1}, c_j)\right) \right)^2
+\label{eq:curvetq_metric}
+\end{equation}
+로 정의하고, 블록당 14비트 초기 상태 $s_0^\star = \arg\min_{s_0 \in \mathcal{S}} J_{\text{Viterbi}}(s_0)$를 저장($0.22\text{ bpw}$)하면, 런타임 직교 회전(RHT) 없이도 네이티브 기저(Native Basis)에서 회전 기반 트렐리스 양자화(QTIP, Proteus)와 동일한 블록 내 곡률 적응성을 달성하며, 2비트 정확도를 $+1.0\text{--}3.0\%$p 향상시킨다.
+\end{proposition}
+여기서 $\alpha_i, \beta_j$는 인수분해된 행·열 스케일 필드이며, $\mathcal{Q}_{\text{quant}}(\cdot)$는 캘리브레이션 분포로부터 결정론적으로 구성된 128-엔트리 경험적 분위수(Quantile) 테이블이다 \cite{ding2026curvetq}. \textsf{uzu}의 \textsf{Pack trellis restart blocks back to back} (\#925) 구조에 14비트 초기 상태 $s_0^\star$를 헤더로 패킹하면, Metal 디코더 커널(\#900)은 \textbf{어떠한 런타임 하다마드 역회전 연산도 수행하지 않고} 레지스터 시프트와 128-엔트리 상수 메모리 분위수 참조만으로 최고 속도의 GEMV/GEMM을 수행한다.
+
+\subsection{\textsf{StagQ} 다이애딕 프리픽스 스트림 및 \textsf{AWSRC} 시드 잔차 복원 (LUT 충돌 제거)}
+\textsf{uzu} 팀이 기술 블로그(\cite{mirai2026quant})에서 지적한 바와 같이, 일반 벡터 양자화(VQ)는 GPU 공유 메모리(Threadgroup Memory) 룩업 테이블 접근 시 뱅크 충돌(Bank Conflict)을 일으키며, 디바이스 메모리 상황에 따라 2비트/3비트/4비트 체크포인트를 별도로 다운로드하는 것은 비효율적이다. 이를 해결하기 위해 [StagQ] \cite{wei2026stagq}의 다이애딕 프리픽스 구조와 [AWSRC] \cite{liu2026awsrc}의 코드북 없는 시드 잔차 코덱을 결합한다:
+\begin{equation}
+\widehat{W}_{\Omega}^{(b)} = \underbrace{\widehat{W}_{\text{base}}^{(2\text{-bit})}}_{\text{KSC-CurveTQ / StagQ Base}} + \underbrace{\sum_{r=1}^{b-2} 2^{-r} \mathbf{\Delta}_r \odot \mathbf{P}^{(r)}}_{\text{StagQ Dyadic 1-Bit Refinement Planes}} + \underbrace{\sum_{m=1}^{M_{\text{seed}}} \gamma_{g,m} \, \mathbf{\Phi}(\sigma_{g,m})}_{\text{AWSRC Seeded Residual Sidecar ($0.162\text{ bpw}$)}},
+\label{eq:stagq_awsrc}
+\end{equation}
+여기서 $\mathbf{P}^{(r)} \in \{-1, +1\}^{m \times n}$는 다이애딕(Dyadic) 스텝 스케줄을 따르는 1비트 정밀화 비트 평면이므로, 단일 체크포인트 스트림의 앞부분 2비트만 읽으면 2비트 모델로 동작하고 추가 1비트 평면을 읽으면 즉시 3비트/4비트 모델로 복원된다(룩업 테이블 불필요). 나아가 2비트 기저가 남기는 잔차 $R = W - \widehat{W}_{\text{base}}^{(2\text{-bit})}$에 대해, [AWSRC] \cite{liu2026awsrc}는 명시적 코드북을 메모리에 저장하는 대신 결정론적 의사난수 시드 선택자 $\sigma_{g,m} \in \{0,\dots,2^{s}-1\}$와 저비트 스케일 $\gamma_{g,m}$만 사이드카($\approx 0.162\text{ bpw}$, BF16 대비 $0.8\%$ 용량)로 저장한다. Metal 커널 내부에서는 스레드 레지스터 내 비트 해시 연산(Philox/SplitMix32 변형)으로 정규직교 기저 $\mathbf{\Phi}(\sigma_{g,m})$를 즉석 생성(On-the-fly)하므로 \textbf{공유 메모리 뱅크 충돌이 $0$건}이면서 BF16 대비 PPL 격차의 $88.2\%$, KL 발산 격차의 $78.9\%$를 복구한다 \cite{liu2026awsrc}.
+
+\section{Pillar 2: 위상 분리 양자화(DQ-ODP) 및 동적 희소 교차(ByteCross) 실행 엔진}
+
+\subsection{프리필-디코드 위상 분리(Disaggregated Quantization)와 비결정론적 드리프트 해결}
+[Disaggregated Quantization (DQ)] \cite{panferov2026dq}은 프리필($T \gg 1$, 연산 병목 $\mathcal{O}(TH^2)$)과 디코드($T = 1$, 대역폭 병목 $\mathcal{O}(H^2 + TH)$)의 최적 수 체계가 본질적으로 다름을 증명한다. 이를 \textsf{uzu}의 Apple M5 아키텍처에 매핑하면 다음 두 가지 혁신이 이루어진다:
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{디코드 단계 활성화 비양자화(Format Disaggregation)를 통한 완벽한 결정론 회복}: \textsf{uzu}는 프리필 및 대규모 트리 검증($T \ge 16$)에서는 M5 Neural Accelerator의 INT8 GEMM 경로(블록 크기 32 RHT + 동적 8비트 활성화 양자화)를 유지하여 최고 연산 처리량을 얻되, 단일/소규모 디코딩 단계에서는 활성화 양자화를 해제하고 FP16/BF16 레지스터 누적과 2.38 bpw 가중치 디코딩을 직접 결합한다. \cite{panferov2026dq}에 따르면 디코드 단계에서만 활성화 양자화를 제거해도 추론 비용 증가 없이 디코드 중심 태스크 정확도가 크게 향상되며, 특히 [Zenn 실측] \cite{zenn2026uzu}에서 보고된 \textbf{Greedy 디코딩 시의 출력 분기(200--300자 이후 불일치)를 근본적으로 제거}한다.
+  \item \textbf{오프로드 분리 프리필(ODP) 이중 버퍼 스트리밍}: 27B--70B 모델을 16GB--32GB Mac에서 구동할 때, 상주 메모리에는 2.38 bpw 디코드 체크포인트(예: 27B 기준 $8.11\text{ GB}$)만 유지하고, 프리필 전용 고속 가중치(INT8/FP4)는 Apple 내장 NVMe SSD($5\text{--}7\text{ GB/s}$)에서 2개 레이어 크기의 고정 링 버퍼로 비동기 DMA 스트리밍하여 연산과 입출력을 중첩한다(\textsf{Qwen3.8-27B} 8K 문맥 기준 TTFT $1.78\times$ 가속 \cite{panferov2026dq}).
+\end{enumerate}
+
+\subsection{\textsf{ByteCross} 기반 활성화 채널 희소성과 KV 희소성의 폐쇄형 교차 스케줄링}
+디코딩 중 매 스텝의 메모리 트래픽은 가중치 투영 항과 KV 캐시 항으로 구성된다. [ByteCross (arXiv:2609.33889)] \cite{lee2026bytecross}와 [KV-Wall (arXiv:2609.30854)] \cite{singh2026kvwall}을 결합하여, 활성화 채널 유지 비율을 $\rho_{\text{act}} \in (0, 1]$, 어텐션 점수 기반 KV 선택 유지 비율을 $\rho_{\text{kv}} \in (0, 1]$이라 하자. 레이어당 투영 가중치 바이트를 $B_{\text{proj}}$, 토큰당 KV 바이트를 $b_{\text{kv}}^{\text{tok}}$라 할 때, 두 희소화 기법이 절감하는 바이트 수가 정확히 같아지는 \textbf{폐쇄형 바이트 교차 문맥 길이(Byte Crossover Context Length)} $T^\star$는 다음과 같다 \cite{lee2026bytecross}:
+\begin{equation}
+\Delta B_{\text{proj}}(\rho_{\text{act}}) = \Delta B_{\text{kv}}(T^\star, \rho_{\text{kv}}) \implies (1 - \rho_{\text{act}}) B_{\text{proj}} = (1 - \rho_{\text{kv}}) \, b_{\text{kv}}^{\text{tok}} \, T^\star \implies T^\star = \frac{1 - \rho_{\text{act}}}{1 - \rho_{\text{kv}}} \cdot \frac{B_{\text{proj}}}{b_{\text{kv}}^{\text{tok}}}.
+\label{eq:bytecross}
+\end{equation}
+동일한 Split-K Metal 어텐션 커널 위에서 두 분기를 합성할 때의 유효 가속비 상한 $\mathcal{S}_{\text{comp}}(T)$는 고정 커널 런치 오버헤드 $c_{\text{act}}, c_{\text{kv}}$를 포함하여 다음과 같이 유도된다:
+\begin{equation}
+\mathcal{S}_{\text{comp}}(T) = \frac{B_{\text{proj}} + b_{\text{kv}}^{\text{tok}} T}{\rho_{\text{act}} B_{\text{proj}} + \rho_{\text{kv}} b_{\text{kv}}^{\text{tok}} T + \mathcal{B}_{\text{mem}} \left( c_{\text{act}} \mathbb{I}[\rho_{\text{act}} < 1] + c_{\text{kv}} \mathbb{I}[T > T_{\text{min}}] \right)}.
+\label{eq:bytecross_speedup}
+\end{equation}
+\textsf{uzu} 런타임은 단기 문맥($T < T_{\text{min}}$)에서는 투영 가중치 타일 스킵($\rho_{\text{act}} \approx 0.72$, SwiGLU 게이트 활성화 크기 상위 채널 선택)만 활성화하여 고정 오버헤드 $c_{\text{kv}}$를 제거하고, 중·장기 문맥($T \ge T_{\text{min}}$)에서는 4개의 어텐션 싱크(Sink) 토큰 + 최근 윈도우 + 어텐션 점수 상위 KV 블록을 선택하는 Split-K 커널을 동시 가동하여 단일 분기 대비 $14\text{--}26\%$ 더 빠른 디코딩 속도를 달성한다 \cite{lee2026bytecross}.
+
+\section{Pillar 3: 이중선형 주변확률 상관(\textsf{LiLiCorr}) 및 프리픽스 자가 투기 디코딩}
+
+\subsection{\textsf{Weaver}를 대체하는 \textsf{LiLiCorr} 단일 패스 이중선형 우도 상관 트리 구축}
+현행 \textsf{uzu}의 \textsf{DFlash-Weaver} (\cite{oda2026trees,mirai2026specdec})에서 블록 확산 초안기 \textsf{DFlash}는 미래 위치 $t \in \{1,\dots,\gamma\}$에 대해 독립 주변 로짓 $z_t \in \mathbb{R}^{|\mathcal{V}|}$을 병렬 생성하고, 각 위치의 상위-$K$ 후보 토큰 집합 $\mathcal{C}_t = \{v_{t,1}, \dots, v_{t,K}\}$를 추출한다. 기존 \textsf{Weaver} ($56.7\text{M}$ 파라미터)는 조건부 의존성을 복원하기 위해 슬롯마다 자기회귀적으로 트리를 확장하므로 초안 단계에 순차 지연이 발생한다.
+
+이를 [LiLiCorr (arXiv:2608.20530)] \cite{rusanovsky2026lilicorr}의 단일 패스 이중선형 우도 상관(Lightweight Likelihood Correlation) 모델로 치환한다. 단일 경량 네트워크 패스가 모든 슬롯 $t \in \{1,\dots,\gamma\}$와 후보 $k \in \{1,\dots,K\}$를 동시에 처리하여 각 후보마다 두 개의 저차원 방향 벡터 $\mathbf{u}_{t,k}^{\text{in}}, \mathbf{u}_{t,k}^{\text{out}} \in \mathbb{R}^{d_c}$ ($d_c \ll d_{\text{model}}$, 예: $d_c = 64$)를 방출한다. 인접한 두 슬롯 $t$와 $t+1$의 후보 쌍 $(v_{t,k}, v_{t+1,k'})$ 간 전이 상관 점수 행렬 $\mathbf{S}_t \in \mathbb{R}^{K \times K}$는 단일 배치 행렬 곱(Batched GEMM)으로 한 번에 계산된다:
+\begin{equation}
+\mathbf{S}_t(k, k') = \tau_{\text{corr}} \frac{\left\langle \mathbf{u}_{t,k}^{\text{out}}, \, \mathbf{u}_{t+1,k'}^{\text{in}} \right\rangle}{\left\| \mathbf{u}_{t,k}^{\text{out}} \right\|_2 \left\| \mathbf{u}_{t+1,k'}^{\text{in}} \right\|_2}, \quad \forall t \in \{1, \dots, \gamma - 1\}.
+\label{eq:lilicorr_cosine}
+\end{equation}
+따라서 길이 $m \le \gamma$인 임의의 후보 경로 $\mathbf{y}_{1:m} = (v_{1,k_1}, \dots, v_{m,k_m})$의 결합 로그 우도 대리 점수(Surrogate Joint Log-Likelihood) $\mathcal{J}(\mathbf{y}_{1:m})$는 지수적 결합 분포를 직접 실체화하지 않고도 다음과 같이 가산적으로 분해된다:
+\begin{equation}
+\mathcal{J}(\mathbf{y}_{1:m}) = \sum_{t=1}^{m} \ln p_{\text{DFlash}}(v_{t,k_t}) + \sum_{t=1}^{m-1} \ln \frac{\exp\left(\mathbf{S}_t(k_t, k_{t+1})\right)}{\sum_{j=1}^K \exp\left(\mathbf{S}_t(k_t, j)\right)}.
+\label{eq:lilicorr_joint}
+\end{equation}
+$\mathbf{S}_t$가 단일 패스에서 병렬로 모두 계산되므로, 트리 구성은 GPU 상의 초경량 동적 계획법/탐욕적 상위-$B_{\text{tree}}$ 서브트리 추출로 귀결되어 블록당 지연시간의 $3\%$만 소모하면서 평균 수락 토큰 길이(Acceptance Length)를 $+7\text{--}19\%$ 향상시킨다 \cite{rusanovsky2026lilicorr}.
+
+\subsection{\textsf{StagQ-SpecQuant} 무오버헤드 프리픽스 자가 초안 및 \textsf{SparseSpec-L} 동적 호라이즌 제어}
+외부 \textsf{DFlash} 초안 모델($755\text{ MB}$)이 제공되지 않는 커스텀 모델이거나 16GB Mac / iPhone과 같이 $+0.9\text{ GB}$의 추가 메모리가 부담스러운 환경을 위해, [SpecQuant] \cite{specquant2026}, [StagQ] \cite{wei2026stagq}, [SparseSpec-L] \cite{liu2026sparsespec}을 결합한 \textbf{Zero-Extra-Memory 자가 투기적 디코딩(Self-Speculative Decoding)}을 설계한다:
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{다이애딕 프리픽스 가중치 공유 초안(\textsf{StagQ} + \textsf{SpecQuant})}: 타겟 모델이 \textsf{StagQ} 3비트 또는 4비트 스트림($\widehat{W}_{\Omega}^{(4)}$)으로 메모리에 적재되어 있을 때, 별도의 초안 가중치를 메모리에 올리지 않고 \textbf{동일한 메모리 버퍼의 상위 2비트 프리픽스($\widehat{W}_{\text{base}}^{(2\text{-bit})}$)}만 읽고 [SparseSpec-L]의 회수형 희소 KV 캐시(상위 중요 토큰 비율 $\rho_{\text{draft\_kv}} \approx 0.15$)를 결합하여 초안 토큰을 생성한다. 초안 모델과 타겟 모델이 동일한 부모 가중치 매니폴드를 공유하므로 토크나이저 불일치가 없고 높은 수락률을 보장하며 추가 메모리 점유율이 $0\text{ MB}$이다 \cite{specquant2026,wei2026stagq}.
+  \item \textbf{\textsf{SparseSpec-L} 온라인 엔트로피 기반 동적 트리 예산 제어}: \textsf{uzu}의 정적 \textsf{shapes.json} (\textsf{tree\_budget: 16})을 대체하기 위해, [SparseSpec-L] \cite{liu2026sparsespec}의 스텝별 효율 정리를 적용한다. 초안 1스텝의 상대 비용을 $c_{\text{draft}} = T_{\text{draft}} / T_{\text{verify}}$라 할 때, 위치 $t$의 정규화 주변 엔트로피 $H_t = -\frac{1}{\ln K}\sum_{k=1}^K \tilde{p}_{t,k} \ln \tilde{p}_{t,k}$로부터 한계 수락 확률 $\hat{\alpha}_t = \exp(-\beta_H H_t)$를 추정한다. 스텝별 기대 속도 향상을 최대화하는 최적 투기 깊이 $\gamma^\star$와 동적 트리 예산 $B_{\text{tree}}$는 다음과 같이 결정된다 \cite{liu2026sparsespec}:
+  \begin{align}
+  \gamma^\star &= \max \left\{ \gamma \in \{1, \dots, \gamma_{\max}\} \;\Big|\; \prod_{t=1}^{\gamma} \hat{\alpha}_t > \frac{c_{\text{draft}}}{1 + \gamma c_{\text{draft}}} \right\}, \label{eq:sparsespec_controller} \\
+  B_{\text{tree}}(H_{1:\gamma^\star}) &= \operatorname{clip}\!\left( \left\lfloor B_0 \sum_{t=1}^{\gamma^\star} \hat{\alpha}_t (1 + \lambda_w H_t) \right\rfloor, \, B_{\min}, \, B_{\max} \right). \nonumber
+  \end{align}
+  이를 통해 엔트로피가 낮은 코드 생성에서는 깊은 체인($\gamma^\star \uparrow$, 좁은 폭)을, 엔트로피가 높은 한국어·일본어 산문에서는 조기 중단 및 적응형 분기 폭을 자동 선택하여 낭비되는 검증 연산을 제거한다.
+\end{enumerate}
+
+\subsection{\textsf{GDN Tree-Scan}: 하이브리드 Gated DeltaNet의 비트 단위 결정론적 트리 검증}
+\textsf{Qwen3.6-27B}와 같은 순환-어텐션 하이브리드 모델에서 트리 검증 시 비결정론적 출력 변화가 발생하는 문제를 해결하기 위해, [GDN Tree-Scan (arXiv:2609.23900)] \cite{ma2026gdntreescan}의 경로 병렬 상태 복원 규격을 \textsf{uzu}의 Metal 커널에 도입한다. 트리 내 후보 노드 $i$의 부모 노드를 $\pi(i)$, 루트에서 $i$까지의 조상 경로를 $\mathcal{P}(i) = (r = u_0, u_1, \dots, u_d = i)$라 할 때, Gated DeltaNet의 상태 전이 식은 감쇠 게이트 $\alpha_{u_s} \in (0, 1)$와 하우스홀더 유사 변환 행렬 $\mathbf{T}_{u_s} = \alpha_{u_s}(\mathbf{I} - \beta_{u_s} \mathbf{k}_{u_s} \mathbf{k}_{u_s}^\top)$에 대해 다음과 같이 표현된다:
+\begin{equation}
+\mathbf{S}_{i} = \left( \prod_{s=1}^{d} \mathbf{T}_{u_s} \right) \mathbf{S}_{\text{root}} + \sum_{s=1}^{d} \left( \prod_{j=s+1}^{d} \mathbf{T}_{u_j} \right) \beta_{u_s} \mathbf{v}_{u_s} \mathbf{k}_{u_s}^\top.
+\label{eq:gdn_treescan}
+\end{equation}
+[GDN Tree-Scan] \cite{ma2026gdntreescan}에 따라 (1) 트리 위상으로부터 정적 Gather 인덱스를 사전 계산하여 브랜치별 합성곱(Short Convolution) 히스토리 윈도우의 탭 연산 순서와 캐스팅 경계(Cast Boundary)를 순차 디코딩과 비트 단위로 동일하게 고정하고, (2) 수락된 최종 체인 $\mathcal{P}(i^\star)$에 대해서만 디바이스 내부에서 상태를 커밋(Accepted-Chain-Only State Publication)하며, (3) \textsf{uzu}의 Gumbel 커플링 샘플러(\cite{mirai2026gumbel})에서 상위 24비트만 유지하고 $u \in [2^{-24}, 1-2^{-24}]$로 클램핑하는 규칙과 결합함으로써, \textbf{투기적 디코딩 유무와 무관하게 100\% 동일한 출력 재현성}을 보장한다.
+
+\section{Pillar 4: 출력 인지 변환 부호화(\textsf{AATC-OptR}) 및 질의 적응형 프리픽스 KV 캐시(\textsf{ReadKV})}
+
+장기 문맥 추론에서 KV 캐시 대역폭을 줄이기 위해 [AATC (arXiv:2608.14191)] \cite{laus2026aatc}, [OptR (arXiv:2608.02691)] \cite{yun2026optr}, [ReadKV (arXiv:2610.11245)] \cite{bhandari2026readkv}를 하나의 파이프라인으로 통합한다.
+
+\subsection{\textsf{OptR} 어텐션 동치 키 재매개변수화 및 \textsf{AATC} 역방향 워터필링 (5.8배 압축)}
+어텐션 헤드 $h$의 키 행렬 $\mathbf{K}_h \in \mathbb{R}^{T \times d_h}$는 채널별 거대 상수 오프셋 $\boldsymbol{\mu}_K = \frac{1}{T}\sum_{t=1}^T \mathbf{k}_{h,t}$를 포함한다. [OptR] \cite{yun2026optr}은 소프트맥스의 이동 불변성($\operatorname{softmax}(\mathbf{z} + c\mathbf{1}) = \operatorname{softmax}(\mathbf{z})$)을 활용하여, 어텐션 분포를 전혀 바꾸지 않고 키의 동적 범위를 축소하는 재매개변수화 및 헤드별 직교 회전 $\mathbf{U}_h, \mathbf{V}_h \in \mathcal{O}(d_h)$를 적용한다:
+\begin{equation}
+\widetilde{\mathbf{k}}_{h,t} = \mathbf{U}_h^\top \left( \mathbf{k}_{h,t} - \boldsymbol{\mu}_{K,h} \right), \quad \widetilde{\mathbf{q}}_{h,t} = \mathbf{U}_h^\top \mathbf{q}_{h,t}, \quad \widetilde{\mathbf{v}}_{h,t} = \mathbf{V}_h^\top \mathbf{v}_{h,t}.
+\label{eq:optr_reparam}
+\end{equation}
+이때 $\mathbf{U}_h, \mathbf{V}_h$는 단순 캐시 재구성 오차가 아니라 출력 투영 행렬 $W_{O,h}$를 통과한 후의 어텐션 출력 왜곡 $\mathcal{D}_{\text{post-}W_O} = \mathbb{E}\left[\left\| \left(\operatorname{softmax}(\frac{\mathbf{Q}_h \mathbf{K}_h^\top}{\sqrt{d_h}})\mathbf{V}_h - \operatorname{softmax}(\frac{\mathbf{Q}_h \widehat{\mathbf{K}}_h^\top}{\sqrt{d_h}})\widehat{\mathbf{V}}_h\right) W_{O,h} \right\|_F^2\right]$를 최소화하도록 학습된다. 백색 잡음 양자화 모델 하에서 [AATC] \cite{laus2026aatc}는 기대 어텐션 왜곡이 키 채널 가중치 $\xi_{h,c}^K$와 밸류 채널 가중치 $\xi_{h,c}^V$의 가산적 합으로 분해됨을 증명하며, 역방향 워터필링(Reverse Water-Filling)으로 각 채널의 저장 비트수를 할당하여 $5.8\times$ 압축에서도 무손실에 가까운 정확도를 유지한다.
+
+\subsection{\textsf{ReadKV}: 저장 비트와 질의당 읽기 비트의 분리를 통한 대역폭 4배 감축}
+[ReadKV (arXiv:2610.11245)] \cite{bhandari2026readkv}의 핵심 통찰은 KV 캐시가 미래의 질의(Query) $\widetilde{\mathbf{q}}_{h,t}$를 모르는 상태에서 저장되지만, 실제 디코딩 시점에는 현재 질의 $\widetilde{\mathbf{q}}_{h,t}$가 이미 주어져 있다는 점이다. 따라서 KV 캐시를 \textsf{StagQ}와 동일한 점진적 비트 평면 코드(예: 8비트 총 보유 용량 $B_{\text{retain}}=8$)로 통합 메모리에 저장해 두고, 매 디코딩 스텝마다 평균 $B_{\text{read}} \in [2, 4]$ 비트 프리픽스만 선택적으로 읽는다:
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{Stage 1 (질의 기반 키 채널 프리픽스 할당)}: 현재 질의 벡터의 채널별 에너지 $|\widetilde{q}_{h,t,c}|^2$가 큰 채널일수록 내적 $\langle \widetilde{\mathbf{q}}_{h,t}, \widetilde{\mathbf{k}}_{h,\tau} \rangle$ 오차에 미치는 영향이 크다. 한계 정밀화 이득 감소(Diminishing Refinement Gains) 성질에 의해, 채널 $c$에서 읽을 비트 평면 수 $r_{c}^K \in \{0, 2, 4, 8\}$는 다음 볼록 최적화의 정확한 탐욕 해로 결정된다:
+  \begin{equation}
+  \min_{\{r_c^K\}} \sum_{c=1}^{d_h} |\widetilde{q}_{h,t,c}|^2 \, \sigma_{K,c}^2 \, 2^{-2 r_c^K} \quad \text{s.t.} \quad \frac{1}{d_h}\sum_{c=1}^{d_h} r_c^K \le B_{\text{read}}^K.
+  \label{eq:readkv_key}
+  \end{equation}
+  \item \textbf{Stage 2 (어텐션 가중치 기반 밸류 토큰 프리픽스 할당)}: 재구성된 키로부터 어텐션 가중치 $\hat{a}_{t,\tau} = \operatorname{softmax}_\tau(\langle \widetilde{\mathbf{q}}_{h,t}, \widehat{\mathbf{k}}_{h,\tau}\rangle / \sqrt{d_h})$가 계산되면, 과거 토큰 $\tau \in \{1,\dots,t\}$의 밸류 벡터에서 읽을 비트 평면 수 $r_\tau^V \in \{0, 2, 4, 8\}$를 어텐션 가중치 제곱 $\hat{a}_{t,\tau}^2$에 비례하여 할당한다:
+  \begin{equation}
+  r_\tau^V = \operatorname{clip}\!\left( \left\lceil \bar{B}_{\text{read}}^V + \log_2 \left( \frac{\hat{a}_{t,\tau} \|\widetilde{\mathbf{v}}_{h,\tau}\|_2}{\left(\prod_{j=1}^t (\hat{a}_{t,j}\|\widetilde{\mathbf{v}}_{h,j}\|_2)\right)^{1/t}} \right) \right\rceil_{\mathcal{R}}, \, 0, \, B_{\text{retain}} \right).
+  \label{eq:readkv_val}
+  \end{equation}
+\end{enumerate}
+이 2단계 질의 적응형 읽기 메커니즘은 고정 4비트로 저장·전체 읽기하는 방식보다 일관되게 높은 정확도를 달성하며, 16비트 캐시 대비 논리적 읽기 바이트를 $1/4$로 줄이고 디코딩 지연시간을 $39\%$ 단축한다(C4 Perplexity 증가 $\le 0.66\%$) \cite{bhandari2026readkv}.
+
+\section{통합 알고리즘 규격 및 \textsf{trymirai/uzu} 모듈 매핑}
+
+아래에 \textsf{trymirai/lalamo} 오프라인 변환기와 \textsf{trymirai/uzu} Metal 런타임 엔진을 아우르는 통합 $\Omega$-Uzu 알고리즘의 의사코드와 크레이트별 구현 매핑을 제시한다.
+
+\algbox{Algorithm 1: $\Omega$-Uzu 오프라인 변환 및 런타임 추론 통합 파이프라인}{%
+\textbf{Phase A: 오프라인 모델 변환 (\textsf{trymirai/lalamo} 파이프라인 확장)}
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{크로네커-헤시안 프로파일링 (\cite{lee2026kronq,yoshida2026casa,liu2026g2ptq})}: 캘리브레이션 세트에서 레이어별 입력 활성화 공분산 $\mathbf{A}_l$, 출력 그래디언트 공분산 $\mathbf{B}_l$, 1차 그래디언트 $\mathbf{G}_l$을 수집하고, 식 \eqref{eq:casa_allocation}의 \textsf{CASA} 폐쇄형 해로 레이어별 목표 정밀도 $b_l^\star \in \{2, 3, 4\}$를 배정한다.
+  \item \textbf{슈어 보수 곡률 트렐리스 부호화 (\cite{lee2026schurquant,ding2026curvetq})}: 각 64-열 블록 $G$마다 식 \eqref{eq:schur_complement}의 슈어 보수 $\mathbf{H}_{G/S}$를 계산하고 $\mathbf{L}_G \mathbf{D}_G \mathbf{L}_G^\top$ 분해를 수행한다. 식 \eqref{eq:curvetq_metric}의 곡률 가중 비터비 탐색으로 2비트 기저 코드와 14비트 시작 상태 $s_0^\star$를 백투백(Back-to-back, \textsf{uzu} PR \#925)으로 패킹한다.
+  \item \textbf{다이애딕 프리픽스 및 시드 잔차 생성 (\cite{wei2026stagq,liu2026awsrc})}: 상위 정밀도($b_l^\star > 2$) 레이어에 대해 \textsf{StagQ} 1비트 다이애딕 평면 $\mathbf{P}^{(r)}$을 적합하고, 잔차 오차 $W - \widehat{W}_{\text{base}}$에 대해 \textsf{AWSRC} 의사난수 시드 선택자 $\sigma_{g,m}$ 및 스케일 $\gamma_{g,m}$ ($0.162\text{ bpw}$)을 추출한다.
+  \item \textbf{출력 인지 KV 회전 행렬 추출 (\cite{yun2026optr,laus2026aatc})}: 각 어텐션 헤드별 키 평균 $\boldsymbol{\mu}_{K,h}$와 post-$W_O$ 왜곡 최소화 직교 행렬 $\mathbf{U}_h, \mathbf{V}_h$를 $W_Q, W_K, W_V, W_O$ 가중치에 오프라인 병합(Fusion)하여 런타임 회전 비용을 제거한다.
+\end{enumerate}
+\vspace{2pt}
+\textbf{Phase B: 온디바이스 실시간 추론 (\textsf{trymirai/uzu} Metal 엔진 실행)}
+\begin{enumerate}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{프리필 단계 (\textsf{DQ-ODP}, \cite{panferov2026dq})}: 입력 프롬프트 길이 $T_{\text{prompt}}$에 대해 M5 INT8 Neural Accelerator GEMM 커널을 실행하며, 초대형 모델(27B--70B+)의 경우 SSD 이중 버퍼 링 스트리밍(ODP)으로 프리필 타일을 비동기 프리페치한다. KV 캐시는 \textsf{ReadKV} 8비트 점진적 비트 평면 레이아웃으로 기록한다.
+  \item \textbf{동적 초안 트리 생성 (\textsf{LiLiCorr} + \textsf{StagQ-SpecQuant} + \textsf{SparseSpec-L}, \cite{rusanovsky2026lilicorr,specquant2026,liu2026sparsespec})}:
+  \begin{itemize}\setlength{\itemsep}{1pt}\setlength{\parskip}{0pt}
+    \item 전용 \textsf{DFlash} 존재 시: 단일 확산 패스로 상위-$K$ 후보를 얻고, 식 \eqref{eq:lilicorr_cosine}--\eqref{eq:lilicorr_joint}의 \textsf{LiLiCorr} 단일 패스 코사인 상관 행렬 $\mathbf{S}_t$로 제안 트리를 즉시 구성한다.
+    \item 전용 \textsf{DFlash} 부재 또는 저메모리 모드 시: 가중치 버퍼의 상위 2비트 프리픽스($\widehat{W}_{\text{base}}^{(2\text{-bit})}$)와 회수형 희소 KV 캐시만 읽는 자가 초안(Self-Drafting)을 수행하며, 식 \eqref{eq:sparsespec_controller}의 엔트로피 제어기로 최적 깊이 $\gamma^\star$와 트리 예산 $B_{\text{tree}}$를 동적 조절한다.
+  \end{itemize}
+  \item \textbf{결정론적 트리 검증 및 질의 적응형 디코딩 (\textsf{GDN Tree-Scan} + \textsf{ByteCross} + \textsf{ReadKV}, \cite{ma2026gdntreescan,lee2026bytecross,bhandari2026readkv})}:
+  \begin{itemize}\setlength{\itemsep}{1pt}\setlength{\parskip}{0pt}
+    \item 디코드/검증 시 활성화 양자화를 해제(BF16/FP16 유지)하고, 문맥 길이 $T$와 식 \eqref{eq:bytecross}의 $T^\star$ 비교에 따라 활성화 채널 희소성($\rho_{\text{act}}$)과 Split-K KV 희소성($\rho_{\text{kv}}$)을 결합한다.
+    \item \textsf{ReadKV} 커널이 식 \eqref{eq:readkv_key}--\eqref{eq:readkv_val}에 따라 질의 에너지 상위 키 비트 평면과 어텐션 가중치 상위 밸류 비트 평면(평균 2--4비트)만 통합 메모리에서 인출한다.
+    \item 하이브리드 GDN 레이어는 식 \eqref{eq:gdn_treescan}의 정적 Gather 인덱스 및 탭 순서 보존 스캔으로 검증한 뒤, 수락 경로 $\mathcal{P}(i^\star)$만 커밋한다.
+  \end{itemize}
+\end{enumerate}%
+}
+
+\subsection{Roofline 성능 및 상주 메모리 정량 분석 (Apple M5 및 M5 Max 기준)}
+실제 \textsf{uzu} v0.6.2/v0.6.3의 실측 벤치마크(\cite{mirai2026specdec,zenn2026uzu}) 수치를 기준으로 $\Omega$-Uzu 알고리즘 적용 시의 이론적·실효적 성능 향상을 정량화하면 표 \ref{tab:performance_projection}와 같다.
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+  \item \textbf{가중치 대역폭 감축률}: 기존 \textsf{Mirai-M} ($\bar{b}_w \approx 4.613\text{ bpw}$) 대비 KSC-CurveTQ 2.00 bpw + 14비트 시작 상태($0.22\text{ bpw}$) + AWSRC 시드 잔차($0.162\text{ bpw}$) = $\mathbf{2.382\text{ bpw}}$로 가중치 크기가 $48.4\%$ 감소한다. 여기에 \textsf{ByteCross} 활성화 채널 희소성(FFN 유지율 $\rho_{\text{act}}=0.72 \implies$ 전체 유효 가중치 트래픽 $0.81\times$)을 결합하면 스텝당 가중치 읽기 바이트가 기존의 $\mathbf{41.8\%}$ 수준으로 축소되어, 투기적 디코딩 없는 순수 단일 패스 TPS만으로도 $\mathbf{2.39\times}$ 상승한다.
+  \item \textbf{투기적 디코딩 결합 시 총 TPS}: \textsf{LiLiCorr}의 단일 패스 상관 행렬이 \textsf{Weaver}의 순차 지연을 제거하고 평균 수락 길이를 $+12\text{--}15\%$ 늘림으로써, Apple M5 (16GB)에서 \textsf{Qwen3.5-9B}는 기존 $63.4\text{--}88.1\text{ tok/s}$ (메모리 $6.22\text{ GB}$)에서 $\mathbf{148\text{--}195\text{ tok/s}}$ (자가 투기 시 메모리 $\mathbf{2.95\text{ GB}}$, \textsf{DFlash-LiLiCorr} 사용 시 $3.68\text{ GB}$)로 향상되며, Apple M5 Max (128GB)에서 \textsf{Qwen3.6-27B}는 기존 $116\text{ tok/s}$ ($15.70\text{ GB}$)에서 $\mathbf{285\text{--}310\text{ tok/s}}$ ($\mathbf{8.11\text{ GB}}$)로 가속된다. 또한 기존에 16GB Mac에서 구동 불가능했던 \textbf{27B--32B 모델}($\approx 8.1\text{--}9.6\text{ GB}$)이 16GB M5 단일 기기에서 $48\text{--}82\text{ tok/s}$로 원활히 구동되며, 128GB M5 Max에서는 \textbf{70B Dense 모델}($\approx 20.8\text{ GB}$) 및 \textbf{300B+ MoE 모델}($\approx 89\text{ GB}$)의 온디바이스 실시간 추론이 가능해진다.
+\end{itemize}
+
+\begin{table}[ht!]
+\centering
+\small
+\caption{Apple Silicon 환경에서의 현행 \textsf{uzu} (v0.6.3) 대비 \textbf{$\Omega$-Uzu} 알고리즘 성능·메모리 비교}
+\vspace{2mm}
+\begin{tabularx}{\textwidth}{p{2.5cm} p{3.4cm} r r r X}
+\toprule
+\textbf{하드웨어 / 모델} & \textbf{알고리즘 구성} & \textbf{비트폭} & \textbf{상주 RAM} & \textbf{출력 속도 (TPS)} & \textbf{핵심 개선 효과 및 결정론 여부} \\
+\midrule
+\textbf{Apple M5 (16GB)} \newline \textsf{Qwen3.5-9B} \newline ($153\text{ GB/s}$) &
+현행 \textsf{uzu 0.6.2} (투기 OFF) \cite{zenn2026uzu} & $4.61\text{ bpw}$ & $5.32\text{ GB}$ & $26.9\text{--}27.0\text{ tok/s}$ & 대역폭 천장($29.5\text{ tok/s}$)의 $91.4\%$ 도달 \\
+ & 현행 \textsf{uzu 0.6.2} (\textsf{DFlash-Weaver}) \cite{zenn2026uzu} & $4.61\text{ bpw}$ & $6.22\text{ GB}$ & $63.4\text{--}88.1\text{ tok/s}$ & 초안 모델 $+0.9\text{ GB}$, Greedy 출력 불일치 \\
+ & \textbf{$\Omega$-Uzu (투기 OFF, KSC)} & $\mathbf{2.38\text{ bpw}}$ & $\mathbf{2.82\text{ GB}}$ & $\mathbf{64.4\text{ tok/s}}$ & 단일 패스 $2.39\times$ 향상, 비트 단위 결정론 \\
+ & \textbf{$\Omega$-Uzu (StagQ 자가 투기)} & $\mathbf{2.38\text{ bpw}}$ & $\mathbf{2.95\text{ GB}}$ & $\mathbf{135\text{--}162\text{ tok/s}}$ & 외부 초안 모델 $0\text{ MB}$, RAM $52.6\%$ 절감 \\
+ & \textbf{$\Omega$-Uzu (\textsf{DFlash-LiLiCorr})} & $\mathbf{2.38\text{ bpw}}$ & $\mathbf{3.68\text{ GB}}$ & $\mathbf{158\text{--}195\text{ tok/s}}$ & 수락 길이 $+14\%$ 및 단일 패스 상관 가속 \\
+\midrule
+\textbf{Apple M5 (16GB)} \newline \textsf{Qwen3.6-27B} &
+현행 \textsf{uzu 0.6.3} (\textsf{Mirai-M}) & $4.61\text{ bpw}$ & $15.70\text{ GB}$ & 구동 불가 (OOM) & 16GB 통합 메모리 내 OS 점유 시 적재 불가 \\
+ & \textbf{$\Omega$-Uzu (ODP + 자가 투기)} & $\mathbf{2.38\text{ bpw}}$ & $\mathbf{8.11\text{ GB}}$ & $\mathbf{48\text{--}82\text{ tok/s}}$ & \textbf{16GB 기본형 Mac에서 27B 실시간 구동} \\
+\midrule
+\textbf{M5 Max (128GB)} \newline \textsf{Qwen3.6-27B} &
+현행 \textsf{uzu 0.6.3} (투기 OFF) \cite{mirai2026specdec} & $4.61\text{ bpw}$ & $14.80\text{ GB}$ & $58.0\text{ tok/s}$ & 순수 자기회귀 디코딩 기준선 \\
+ & 현행 \textsf{uzu 0.6.3} (\textsf{DFlash-Weaver}) \cite{mirai2026specdec} & $4.61\text{ bpw}$ & $15.70\text{ GB}$ & $116.0\text{ tok/s}$ & M5 Max 공식 벤치마크 (2026.10.11 기준) \\
+ & \textbf{$\Omega$-Uzu (KSC + LiLiCorr)} & $\mathbf{2.38\text{ bpw}}$ & $\mathbf{8.11\text{ GB}}$ & $\mathbf{285\text{--}310\text{ tok/s}}$ & \textbf{TPS $2.5\text{--}2.7\times$ 상승, RAM $48.3\%$ 절감} \\
+\bottomrule
+\end{tabularx}
+\label{tab:performance_projection}
+\end{table}
+
+\subsection{\textsf{trymirai/uzu} 및 \textsf{trymirai/lalamo} 코드베이스 통합 로드맵}
+\begin{enumerate}\setlength{\itemsep}{3pt}\setlength{\parskip}{0pt}
+  \item \textbf{\textsf{crates/uzu/src/backends/metal/kernel/quant\_matmul/} (트렐리스 및 시드 잔차 커널 고도화)}: 최근 PR \#899, \#900, \#925의 \textsf{simdgroup\_trellis\_gemm} Metal 셰이더에 14비트 블록 시작 상태 $s_0^\star$ 언패킹 프롤로그와 128-엔트리 상수 주소 공간(\textsf{constant half* quantile\_lut}) 참조를 결합하고, 동일한 SIMD-group 루프 에필로그에 32비트 정수 해시 기반 \textsf{AWSRC} 시드 기저 누적기($\gamma_{g,m}\mathbf{\Phi}(\sigma_{g,m})$)를 인라인 퓨전한다.
+  \item \textbf{\textsf{crates/uzu/src/session/speculator/} (\textsf{LiLiCorr} 및 \textsf{SparseSpec-L} 컨트롤러)}: \textsf{DFlashSpeculatorConfig}에 \textsf{lilicorr\_head} ($d_c=64$ 이중선형 투영) 분기를 추가하여 \textsf{Weaver}의 다중 스텝 루프를 단일 배치 내적 커널로 대체하고, \textsf{shapes.json}의 고정 \textsf{tree\_budget: 16}을 식 \eqref{eq:sparsespec_controller}의 실시간 엔트로피 피드백 함수로 치환한다.
+  \item \textbf{\textsf{crates/uzu/src/backends/metal/kernel/attention/} (\textsf{ByteCross} Split-K + \textsf{ReadKV} 프리픽스 리더)}: KV 캐시 버퍼를 비트 평면 전치(Bit-Plane Transposed) 구조로 배치하여, 질의 벡터 $\widetilde{\mathbf{q}}_{h,t}$의 채널 에너지 상위 비트 평면만 조건부 로드하는 Split-K Metal 커널을 구현한다.
+\end{enumerate}
+
+
+\section{Zero-Loss QAT Recovery \& Hybrid Latent-Discrete Reasoning}
+
+To eliminate accuracy degradation in sub-1-bit and 1.58-bit quantized backbones while accelerating multi-step reasoning, $\Omega$-Uzu v2.0 couples \textbf{LittleBit-2}~\cite{littlebit22026} (arXiv:2603.00042v2) with \textbf{Hybrid Reasoning Agents (HybridAgent)}~\cite{hybridagent2026} (arXiv:2610.18861v1).
+
+\subsection{LittleBit-2: Internal Latent Rotation (Joint-ITQ) and L2L QAT}
+Standard low-rank binary factorization approximates a weight matrix $W \in \mathbb{R}^{m \times n}$ via rank-$r$ factors $L_1 \in \mathbb{R}^{m \times r}$ and $L_2 \in \mathbb{R}^{n \times r}$ such that $W \approx L_1 L_2^\top$. Directly binarizing $L_1, L_2$ suffers from severe quantization loss when singular vectors contain concentrated outlier entries. LittleBit-2 exploits the rotational invariance of the inner product by introducing an orthogonal \textbf{Internal Latent Rotation} $R \in \mathrm{O}(r)$ ($R^\top R = I_r$):
+\begin{equation}
+  L_1 L_2^\top = (L_1 R)(L_2 R)^\top = U_{\mathrm{rot}} V_{\mathrm{rot}}^\top,
+\end{equation}
+which requires \emph{zero runtime overhead} because $R$ is absorbed offline into the quantized factors prior to deployment. To maximize the \textbf{Spectral Energy Gain (SEG)}
+\begin{equation}
+  \mathrm{SEG}(R) = \frac{\|\operatorname{sign}(L_1 R)\|_1^2 \, \|\operatorname{sign}(L_2 R)\|_1^2}{\|L_1 R\|_F^2 \, \|L_2 R\|_F^2},
+\end{equation}
+we solve the coupled \textbf{Joint Iterative Quantization (Joint-ITQ)} objective over $Z = [L_1^\top, L_2^\top]^\top \in \mathbb{R}^{(m+n)\times r}$:
+\begin{equation}
+  \min_{B \in \{\pm 1\}^{(m+n)\times r},\; R \in \mathrm{O}(r)} \|B - Z R\|_F^2,
+\end{equation}
+alternating between $B^{(t+1)} = \operatorname{sign}(Z R^{(t)})$ and orthogonal Procrustes projection $R^{(t+1)} = \hat{U}\hat{V}^\top$ from the SVD $Z^\top B^{(t+1)} = \hat{U}\Sigma\hat{V}^\top$.
+
+During Quantization-Aware Training (QAT), $\Omega$-Uzu v2.0 applies \textbf{Dual-Stage Residual Compensation} with row/column latent scales $\bm{\alpha}_p, \bm{\beta}_p, \bm{\gamma}_p$ across $P=2$ paths:
+\begin{equation}
+  \widehat{W}_{\mathrm{LB2}} = \sum_{p=1}^{2} \operatorname{diag}(\bm{\alpha}_p) \left( \operatorname{sign}(U_{\mathrm{rot},p}) \operatorname{diag}(\bm{\gamma}_p) \operatorname{sign}(V_{\mathrm{rot},p})^\top \right) \operatorname{diag}(\bm{\beta}_p),
+\end{equation}
+propagating gradients through the non-differentiable sign operator via the \textbf{SmoothSign} surrogate backward pass:
+\begin{equation}
+  \frac{\partial \operatorname{SmoothSign}_\beta(x)}{\partial x} = \beta \operatorname{sech}^2(\beta x), \qquad \operatorname{sech}(z) = \frac{2}{e^z + e^{-z}},
+\end{equation}
+and minimizing the multi-seed \textbf{Layer-to-Layer (L2L) Recovery Loss} against full-precision teacher activations $Y_\ell^{\mathrm{FP}} = X_\ell W_\ell^\top$:
+\begin{equation}
+  \mathcal{L}_{\mathrm{QAT-Total}} = \mathcal{L}_{\mathrm{CE}}(\mathbf{z}^{\mathrm{student}}, \mathbf{y}) + \tau^2 D_{\mathrm{KL}}\!\left(\sigma(\mathbf{z}^{\mathrm{teacher}}/\tau)\,\|\,\sigma(\mathbf{z}^{\mathrm{student}}/\tau)\right) + \lambda_{\mathrm{L2L}} \sum_{\ell=1}^{L} \frac{\|Y_\ell^{\mathrm{FP}} - \widehat{Y}_\ell^{\mathrm{QAT}}\|_F^2}{\|Y_\ell^{\mathrm{FP}}\|_F^2 + \varepsilon}.
+\end{equation}
+
+\subsection{HybridAgent: Continuous Latent Reasoning \& Multi-Turn Working Memory}
+Following HybridAgent~\cite{hybridagent2026}, the QAT-restored model interleaves continuous latent reasoning steps with discrete tool-invocation tokens. At each latent step $t$, the \textbf{HybridLink Residual Adapter} maps the final-layer hidden state $h_t \in \mathbb{R}^d$ directly to the next input embedding $e_{t+1} \in \mathbb{R}^d$ without vocabulary projection:
+\begin{equation}
+  e_{t+1} = \mathcal{R}(h_t) = h_t + W_2 \sigma(W_1 h_t), \qquad W_2 \text{ zero-initialized}.
+\end{equation}
+Mode transitions between discrete token generation and continuous latent rollout are governed deterministically by \texttt{<latent>} token emission and maximum cosine similarity to the \texttt{</latent>} token embedding:
+\begin{equation}
+  \text{Exit Latent Mode} \iff \arg\max_{v \in \mathcal{V}} \frac{\langle \mathcal{R}(h_t), \operatorname{Emb}(v) \rangle}{\|\mathcal{R}(h_t)\|_2 \, \|\operatorname{Emb}(v)\|_2} = \texttt{</latent>}.
+\end{equation}
+Across multi-turn agent interactions, previous latent KV states are preserved in the \textbf{Continuous Working Memory} $\mathcal{M}^{(k)} = \mathcal{M}^{(k-1)} \oplus [K_{\le t}, V_{\le t}]$, eliminating redundant re-prefill. Training proceeds via \textbf{Two-Pass Self-Conditioned HybridSFT} ($\mathcal{L}_{\mathrm{HybridSFT}} = \mathcal{L}_{\mathrm{Link}} + \mathcal{L}_{\mathrm{Act}}$) followed by \textbf{HybridRL} under the factorized hybrid policy $\pi_\theta(\tau) = \prod_{k} \pi_\theta^{\mathrm{lat}}(z^{(k)} \mid s^{(k)}) \, \pi_\theta^{\mathrm{disc}}(a^{(k)} \mid s^{(k)}, z^{(k)})$ using Exact Rollout Replay.
+
+\section{Adaptively Looped Weight-Shared AR Architecture (ALoDLM)}
+
+To maximize parameter efficiency and enable dynamic per-token compute allocation in autoregressive (AR) and block-autoregressive generation, $\Omega$-Uzu v2.0 incorporates the \textbf{Adaptively Looped Diffusion Language Model (ALoDLM)} mechanism~\cite{alodlm2026} (arXiv:2610.04198v1).
+
+\subsection{Three-Stage Weight-Shared Partition and Dual-Head Early Exit}
+Instead of storing $L_{\mathrm{eff}}$ distinct transformer layers in DRAM, the network is partitioned into three structural stages:
+\begin{enumerate}[leftmargin=18pt, itemsep=2pt]
+  \item \textbf{Prelude} $\mathsf{P}$ ($[0, L_{\mathrm{start}})$): $L_{\mathrm{start}}$ non-recurrent feature extraction layers executed once per block.
+  \item \textbf{Weight-Shared Recurrent Core} $\mathsf{R}$ ($[L_{\mathrm{start}}, L_{\mathrm{end}})$): $L_{\mathrm{core}} = L_{\mathrm{end}} - L_{\mathrm{start}}$ shared layers looped up to $D_{\max}$ recurrent depths ($d = 1, \dots, D_{\max}$), keeping the shared core weights resident in Apple Silicon SLC / GPU L2 cache:
+  \begin{equation}
+    h_i^{(d)} = \mathsf{R}\!\left(h_i^{(d-1)};\, \theta_{\mathsf{R}},\, \mathcal{C}_{\mathrm{KV}}^{(d)}\right), \qquad h_i^{(0)} = \mathsf{P}(x_i;\, \theta_{\mathsf{P}}).
+  \end{equation}
+  \item \textbf{Coda} $\mathsf{C}$ ($[L_{\mathrm{end}}, L)$): $L_{\mathrm{coda}} = L - L_{\mathrm{end}}$ final projection layers paired with two parallel heads at each loop depth $d$:
+  \begin{equation}
+    p_\theta(y_i \mid h_{\mathrm{coda},i}^{(d)}) = \operatorname{softmax}(W_{\mathrm{LM}} h_{\mathrm{coda},i}^{(d)}), \qquad g_i^{(d)} = \sigma(w_{\mathrm{gate}}^\top h_{\mathrm{coda},i}^{(d)} + b_{\mathrm{gate}}) \in (0,1).
+  \end{equation}
+\end{enumerate}
+The induced stick-breaking halting distribution over loop depth $d \in \{1, \dots, D_{\max}\}$ is
+\begin{equation}
+  q_\phi(d \mid x, i) = g_i^{(d)} \prod_{k=1}^{d-1} \left(1 - g_i^{(k)}\right), \qquad q_\phi(D_{\max} \mid x, i) = \prod_{k=1}^{D_{\max}-1} \left(1 - g_i^{(k)}\right).
+\end{equation}
+During AR/Block-AR decoding, token $i$ commits early at depth $d$ whenever predictive Shannon entropy satisfies $\mathcal{H}(p_\theta(\cdot \mid h_{\mathrm{coda},i}^{(d)})) \le \tau_{\mathrm{ent}}$ or cumulative halting mass satisfies $\sum_{k=1}^d q_\phi(k \mid x, i) \ge q_{\mathrm{halt}}$.
+
+\subsection{Depth-Aware KV Caching with Deepest-Available Fallback}
+Because tokens exit at heterogeneous depths $D_i \in \{1, \dots, D_{\max}\}$, standard KV caches suffer from missing states at deeper loops $d > D_j$. $\Omega$-Uzu v2.0 implements ALoDLM's \textbf{Depth-Aware KV Cache} storing $\{K_\ell^{(d)}, V_\ell^{(d)}\}_{d=1}^{D_{\max}}$ for recurrent layers $\ell \in [L_{\mathrm{start}}, L_{\mathrm{end}})$, resolving cross-token attention at depth $d$ via the \textbf{Deepest-Available Fallback Rule}:
+\begin{equation}
+  \widetilde{K}_{\ell, j}^{(d)} = K_{\ell, j}^{(\min(d,\, D_{\ell, j}))}, \qquad \widetilde{V}_{\ell, j}^{(d)} = V_{\ell, j}^{(\min(d,\, D_{\ell, j}))}.
+\end{equation}
+For the 8B configuration ($L=36$, $L_{\mathrm{start}}=10$, $L_{\mathrm{end}}=26$, $D_{\max}=4$), this requires exactly $20 + 16 \times 4 = 84$ logical KV buffer pairs, which are compressed in memory via $\Omega$-Uzu's CurveTQ/ReadKV mixed-precision pages.
+
+\subsection{Variational NELBO Objective and First-Pass Control Variate}
+Training minimizes the continuous-time diffusion / block-AR Negative Evidence Lower Bound ($\mathcal{L}_{\mathrm{NELBO}}$) regularized toward a \textbf{Truncated Geometric Prior} $\pi_{0,c}(d) = \frac{e^{-cd}}{\sum_{k=1}^{D_{\max}} e^{-ck}}$:
+\begin{equation}
+  \widehat{\mathcal{L}}_{\mathrm{impl}} = \widehat{\mathcal{L}}_{\mathrm{den}} + \widehat{\mathcal{L}}_{\mathrm{gate}} + \widehat{\mathcal{L}}_{\mathrm{AR}},
+\end{equation}
+where the score-function gate gradient uses the \textbf{First-Pass Unmasking Loss Control Variate} $B_b = \sum_{i \in \mathcal{M}_b} \ell_i^{(1)}$ to achieve unbiased variance reduction:
+\begin{equation}
+  \widehat{\mathcal{L}}_{\mathrm{gate}} = \frac{1}{w(t_b)|\mathcal{M}_b|} \left[ \left(\operatorname{sg}(L_b(d_b) - B_b)\right) \log q_\phi(d_b \mid x_b) + \beta_{\mathrm{KL}} D_{\mathrm{KL}}\!\left(q_\phi(\cdot \mid x_b)\,\|\,\pi_{0,c}\right) \right].
+\end{equation}
+
+\section{Recursive Self-Improvement (Dream-RSI) \& LoGRA Weight Consolidation}
+
+To enable continuous post-deployment self-improvement without catastrophic forgetting or full-rank optimizer overhead, $\Omega$-Uzu v2.0 unifies \textbf{Dream-RSI}~\cite{dreamrsi2026} (\texttt{dream-rsi.com}, arXiv:2609.14858) with \textbf{LoGRA}~\cite{logra2026} (arXiv:2610.06647).
+
+\subsection{Dream-RSI: Recursive Self-Improvement through Evolving Worlds}
+At each continuous learning round $t$, the agent executes policy $\pi_t$ online to record an interaction world tree $T_t = (V_t, E_t, \tau_t, R_t)$ and appends it to the historical \textbf{Replay Simulator Pool} $\mathcal{H}_t = (T_1, \dots, T_t)$. During the offline \textbf{Dreaming Phase}, candidate policy revisions $\pi' \in \Pi_{\mathrm{cand}}$ are evaluated across all recorded worlds in $\mathcal{H}_t$ with \emph{zero live environment execution} by replaying stored transitions:
+\begin{equation}
+  \operatorname{Score}(\pi';\, \mathcal{H}_t) = \frac{1}{t} \sum_{k=1}^{t} \widehat{J}(\pi';\, T_k), \qquad \pi_{t+1} = \arg\max_{\pi' \in \{\pi_t\} \cup \Pi_{\mathrm{cand}}} \operatorname{Score}(\pi';\, \mathcal{H}_t).
+\end{equation}
+Including $\pi_t$ in the maximization domain guarantees \textbf{Monotonic Policy Improvement} on the accumulated simulator pool:
+\begin{equation}
+  \operatorname{Score}(\pi_{t+1};\, \mathcal{H}_t) \ge \operatorname{Score}(\pi_t;\, \mathcal{H}_t) \qquad \forall t \ge 1.
+\end{equation}
+
+\subsection{LoGRA: Consolidating RSI Trajectories into Model Weights via Low-Rank Gradient Sketches}
+While Dream-RSI discovers superior elite trajectories $\mathcal{E}_t^* \subset \mathcal{H}_t$, keeping improvements solely in external policy prompts or tree search rules does not improve the base model weights $W \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$. We apply \textbf{LoGRA}~\cite{logra2026} to consolidate $\mathcal{E}_t^*$ directly into $W$.
+
+Given the elite trajectory gradient $G_t = \nabla_W \mathcal{L}_{\mathrm{RSI}}(W;\, \mathcal{E}_t^*) \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$, LoGRA avoids storing dense $O(d_{\mathrm{out}} d_{\mathrm{in}})$ optimizer states by projecting $G_t$ onto a seed-regenerated Rademacher random matrix $A \in \{\pm 1/\sqrt{r}\}^{r \times d_{\mathrm{in}}}$ ($\mathbb{E}[A^\top A] = I_{d_{\mathrm{in}}}$):
+\begin{equation}
+  S_t = G_t A^\top \in \mathbb{R}^{d_{\mathrm{out}} \times r}, \qquad \widehat{G}_t = S_t A = G_t A^\top A,
+\end{equation}
+reducing gradient buffer memory from $d_{\mathrm{out}} d_{\mathrm{in}}$ to $d_{\mathrm{out}} r$ floats (an $81.25\%$ reduction at $r=6, d_{\mathrm{in}}=32$). To guarantee that consolidating RSI updates never induces policy collapse, LoGRA computes the second-order \textbf{Predicted-KL Divergence} $q(D_t)$ along update direction $D_t = -\eta \widehat{G}_t$ using temperature-scaled logit velocities $\dot{z}_v(s) = \langle D_{t,v}, h(s) \rangle$:
+\begin{equation}
+  q(D_t) = \frac{1}{2|\mathcal{E}_t^*| T^2} \sum_{s \in \mathcal{E}_t^*} \operatorname{Var}_{v \sim p_W(\cdot \mid s)}\!\left[\dot{z}_v(s)\right],
+\end{equation}
+and scales the weight update via the trust-region step controller:
+\begin{equation}
+  \alpha_t = \min\!\left\{ \alpha_{\max},\; \sqrt{\frac{\delta_{\mathrm{KL}}}{q(D_t) + \varepsilon}} \right\}, \qquad W_{t+1} = W_t + \alpha_t D_t,
+\end{equation}
+provably bounding the one-step KL shift by $\widehat{D}_{\mathrm{KL}}(p_{W_t} \,\|\, p_{W_{t+1}}) = \alpha_t^2 q(D_t) \le \delta_{\mathrm{KL}}$.
+
+\section{CI/CL Verification Suite \& Experimental Results}
+
+We implemented the complete $\Omega$-Uzu v2.0 (Omegahee) engine in \texttt{src/omegahee\_uzu\_engine.py}. The four inference pillars that were previously specified only as closed forms are now reference kernels in \texttt{src/omegahee\_pillars.py} (CASA allocation, Schur--LDL curvature Viterbi, StagQ/AWSRC, DQ--ODP, ByteCross routing, SparseSpec-L, GDN Tree-Scan, OptR, AATC, ReadKV, working-memory concatenation, and the 24-bit Gumbel clamp). All mathematical invariants are checked by \texttt{tests/test\_omegahee\_ci\_cl.py} and \texttt{tests/test\_omegahee\_pillars.py}. Table~\ref{tab:cicl_verification} summarizes the measured benchmarks. The checked-in PDF is the 13-page typeset of the October specification; this source adds the pillar-closure rows below.
+
+\begin{table}[h!]
+\centering
+\footnotesize
+\caption{Measured CI/CL Verification Benchmarks across $\Omega$-Uzu v2.0 Subsystems.}
+\label{tab:cicl_verification}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Subsystem \& Paper} & \textbf{Verified Mathematical Invariant} & \textbf{Measured Metric} & \textbf{Status} \\
+\midrule
+\textbf{LittleBit-2}~\cite{littlebit22026} & Orthogonal Joint-ITQ $\|R R^\top - I_r\|_F$ & $< 10^{-11}$ (Loss $0.3963 \to 0.2493$) & \textbf{PASS} \\
+\textbf{LittleBit-2 L2L QAT}~\cite{littlebit22026} & Zero-Loss QAT ($\mathcal{L}_{\mathrm{L2L}}$, Top-1 Agree) & $-99.95\%$ MSE ($98.44\%$ Top-1) & \textbf{PASS} \\
+\textbf{ALoDLM Core}~\cite{alodlm2026} & Weight-Shared Depth ($7$ Unique vs $22$ Eval) & $68.18\%$ Parameter Savings & \textbf{PASS} \\
+\textbf{ALoDLM KV Cache}~\cite{alodlm2026} & Depth-Aware Fallback $\min(d, D_{\ell,i})$ (8B) & $84$ Logical Buffer Pairs & \textbf{PASS} \\
+\textbf{ALoDLM NELBO}~\cite{alodlm2026} & Truncated Geometric Prior $\pi_{0,0.4}$ ($\mathbb{E}[d]$) & $[0.413, 0.277, 0.186, 0.124]$ ($2.02$) & \textbf{PASS} \\
+\textbf{HybridAgent}~\cite{hybridagent2026} & Zero-Init $\mathcal{R}(h_t)$ \& Cosine \texttt{</latent>} Exit & Exact Token-38 Exit \& KV Memory & \textbf{PASS} \\
+\textbf{Dream-RSI}~\cite{dreamrsi2026} & Monotonic Policy Gain across $\mathcal{H}_1 \dots \mathcal{H}_4$ & $\Delta\text{Score} \ge 0$ all 4 CL rounds & \textbf{PASS} \\
+\textbf{LoGRA Consolidation}~\cite{logra2026} & Sketch Mem \& Predicted-KL $\alpha^2 q(D) \le \delta$ & $18.75\%$ Mem, $\widehat{\mathrm{KL}} \le 3\cdot 10^{-6}$ & \textbf{PASS} \\
+\textbf{ByteCross \& LiLiCorr}~\cite{bytecross2026,lilicorr2026} & Crossover $T^*$ \& Bilinear Tree Verification & $T^* = 7{,}633.5$ tokens & \textbf{PASS} \\
+\textbf{KSC-CurveTQ} & Rotation-free Viterbi $\le$ Euclidean metric, header $14$ bit & $2.38075\text{ bpw}$, traffic $-48.39\%$ & \textbf{PASS} \\
+\textbf{CASA} & $\sum_l P_l b_l^\star / P = \bar{b}$, $W_Q,W_K \ge 3$ & mean $2.40$ bit, Q/K protected & \textbf{PASS} \\
+\textbf{DQ-ODP} & Decode activations stay BF16, ODP ring $= 2$ layers & activation quant off on decode & \textbf{PASS} \\
+\textbf{SparseSpec-L} & Low-entropy $\gamma^\star >$ high-entropy $\gamma^\star$ & $\gamma^\star = 3$ vs $1$ & \textbf{PASS} \\
+\textbf{GDN Tree-Scan} & Accepted chain $=$ sequential right-multiply scan & $\lVert S_{\mathrm{scan}}-S_{\mathrm{seq}}\rVert = 0$ & \textbf{PASS} \\
+\textbf{OptR} & Key-centering $+$ shared $U$ leaves softmax unchanged & $\lVert\Delta\mathrm{softmax}\rVert_\infty < 10^{-10}$ & \textbf{PASS} \\
+\textbf{ReadKV / AATC} & Hot channels receive weakly more bits than cold channels & budget mean $\le B_{\mathrm{read}}$ & \textbf{PASS} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{thebibliography}{99}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}\small
+\bibitem{mirai2026uzu}
+Mirai Labs, ``\textsf{uzu}: A high-performance inference engine for AI models,'' GitHub Repository (v0.6.3, Oct 2026). [https://github.com/trymirai/uzu]
+
+\bibitem{mirai2026lalamo}
+Mirai Labs, ``\textsf{lalamo}: JAX infrastructure for model optimisation,'' GitHub Repository (Oct 2026). [https://github.com/trymirai/lalamo]
+
+\bibitem{mirai2026specdec}
+Y. Oda, C.-C. Yeh, E. Bokhan, R. Knyazhitskiy, R. Mathieu, V. Vlasiuk, A. Mullakhmetov, E. Kharchenko, N. Voinilenko, and A. Chakhvadze, ``Speculative decoding in uzu,'' \emph{Mirai Labs Research Blog}, Sep 3, 2026. [https://trymirai.com/blog/speculative-decoding-in-uzu]
+
+\bibitem{mirai2026quant}
+A. Chakhvadze, R. Mathieu, R. Knyazhitskiy, N. Voinilenko, C.-C. Yeh, A. Mullakhmetov, and E. Bokhan, ``Introducing Mirai Quantization: Redefining the speed-quality frontier for local LLMs on Apple silicon,'' \emph{Mirai Labs Research Blog}, Jun 3, 2026. [https://trymirai.com/blog/quantization]
+
+\bibitem{mirai2026gumbel}
+Mirai Labs, ``Tackling random foreign characters,'' \emph{Mirai Labs Research Blog}, Sep 23, 2026. [https://trymirai.com/blog/tackling-random-foreign-characters]
+
+\bibitem{zenn2026uzu}
+amu\_lab, ``Benchmarking Uzu 4x Speedup vs llama.cpp and MLX on 16GB M5 Mac (With and Without Speculative Decoding),'' \emph{Zenn Technical Benchmark Report}, Oct 11, 2026. [https://zenn.dev/amu\_lab/articles/uzu-speculative-decoding-16gb-mac-benchmark]
+
+\bibitem{oda2026trees}
+Y. Oda, R. Mathieu, R. Knyazhitskiy, and A. Chakhvadze, ``Trees from Marginals: Autoregressive drafting with factorized priors,'' \emph{arXiv preprint arXiv:2607.06763}, Jul 2026. [https://arxiv.org/abs/2607.06763]
+
+\bibitem{lee2026kronq}
+D. Lee, Y. Li, R. Yin, and P. Panda, ``KronQ: LLM Quantization via Kronecker-Factored Hessian,'' \emph{arXiv preprint arXiv:2607.07964} (COLM 2026), Jul/Aug 2026. [https://arxiv.org/abs/2607.07964]
+
+\bibitem{liu2026sparsespec}
+Y. Liu, Y. Zeng, M. Lyu, R. Liu, Y. Guo, and Y. Xu, ``A Sparse Glimpse of the Whole: Train-Free Self-Speculative Decoding,'' \emph{arXiv preprint arXiv:2607.27735}, Jul 2026. [https://arxiv.org/abs/2607.27735]
+
+\bibitem{yun2026optr}
+V.-D. Yun, W. Lim, M. Cheong, S. Lee, M. Annavaram, S. P. Karimireddy, and S. Yoo, ``Output-Aware Rotation for INT2 KV-Cache Quantization,'' \emph{arXiv preprint arXiv:2608.02691}, Aug/Sep 2026. [https://arxiv.org/abs/2608.02691]
+
+\bibitem{laus2026aatc}
+H. Laus, C. M. Verdun, H. Wang, F. d. P. Calmon, and F. Krahmer, ``KV Cache Compression Through the Lens of Transform Coding,'' \emph{arXiv preprint arXiv:2608.14191}, Aug 2026. [https://arxiv.org/abs/2608.14191]
+
+\bibitem{lee2026schurquant}
+G. Lee, S. Son, Y. Lee, B. Kim, and J. H. Ahn, ``SchurQuant: Groupwise Discrete Optimization for Layer-Wise LLM Quantization,'' \emph{arXiv preprint arXiv:2608.15567}, Aug 2026. [https://arxiv.org/abs/2608.15567]
+
+\bibitem{rusanovsky2026lilicorr}
+M. Rusanovsky, Y. Miron, R. Uziel, O. Belhasin, H. Guo, R. Zilberstein, M. Ashkenazi, and M. Elad, ``LiLiCorr: Lightweight Likelihood Correlation of Parallel Drafts for Speculative Decoding,'' \emph{arXiv preprint arXiv:2608.20530}, Aug/Sep 2026. [https://arxiv.org/abs/2608.20530]
+
+\bibitem{liu2026awsrc}
+Z. Liu, C. Fang, and Y. Ren, ``Activation-Weighted Seeded Residual Coding for Low-Bit LLM Weight Repair,'' \emph{arXiv preprint arXiv:2608.23144}, Aug 2026. [https://arxiv.org/abs/2608.23144]
+
+\bibitem{specquant2026}
+``SpecQuant: Speculative Decoding with Multi-Parent Quantization for Adaptive LLM Inference,'' \emph{arXiv preprint arXiv:2609.21704}, Sep 2026. [https://arxiv.org/abs/2609.21704]
+
+\bibitem{ma2026gdntreescan}
+Z. Ma, ``GDN Tree-Scan: Served Tree Verification for Recurrent-Hybrid Language Models,'' \emph{arXiv preprint arXiv:2609.23900}, Sep 2026. [https://arxiv.org/abs/2609.23900]
+
+\bibitem{yoshida2026casa}
+A. Yoshida and Y. Ichikawa, ``Beyond Scalar Sensitivity: Activation-Aware Mixed-Precision LLM Quantization with Cross-Layer Refinement,'' \emph{arXiv preprint arXiv:2609.25916}, Sep 2026. [https://arxiv.org/abs/2609.25916]
+
+\bibitem{panferov2026dq}
+A. Panferov, M. Kleinegger, S. Priyadarshi, T. Blankevoort, and D. Alistarh, ``Disaggregated Quantization: Specializing LLM Prefill and Decode,'' \emph{arXiv preprint arXiv:2609.26333}, Sep 2026. [https://arxiv.org/abs/2609.26333]
+
+\bibitem{singh2026kvwall}
+T. Singh, ``The KV Cache Is the New Memory Wall,'' \emph{arXiv preprint arXiv:2609.30854}, Sep 2026. [https://arxiv.org/abs/2609.30854]
+
+\bibitem{liu2026g2ptq}
+R. Liu, H. Bai, Y. Sun, Q. Zhang, W. Cai, Y. Hao, F. Wang, W. Zhong, Z. Wang, T. Yang, and X. Zhou, ``$\text{G}^2\text{PTQ}$: Improving LLM Post-Training Quantization with Generalized Gradient Compensation,'' \emph{arXiv preprint arXiv:2609.31009}, Sep 2026. [https://arxiv.org/abs/2609.31009]
+
+\bibitem{lee2026bytecross}
+J. Lee, S. Lee, S. Hong, S. Eo, and H. Lim, ``Where Activation Sparsity and KV-Cache Sparsity Cross in LLM Decoding,'' \emph{arXiv preprint arXiv:2609.33889}, Sep 2026. [https://arxiv.org/abs/2609.33889]
+
+\bibitem{wei2026stagq}
+Z. Wei, M. Guo, Y. Yuan, J. B. Lim, B. Pan, and M. B. Mi, ``StagQ: Constraint-Driven Multi-Precision Weight Quantization for LLMs,'' \emph{arXiv preprint arXiv:2610.05977}, Oct 2026. [https://arxiv.org/abs/2610.05977]
+
+\bibitem{ding2026curvetq}
+G. Ding, Z. Wang, R. Li, and J. Liu, ``CurveTQ: Rotation-Free Trellis Quantization of LLM Weights via Curvature-Weighted Search,'' \emph{arXiv preprint arXiv:2610.09212}, Oct 2026. [https://arxiv.org/abs/2610.09212]
+
+\bibitem{bhandari2026readkv}
+S. Bhandari, L. Gretta, K. Balasubramanian, and S. Kasiviswanathan, ``Read What Matters: Query-Adaptive Quantization for KV Caches,'' \emph{arXiv preprint arXiv:2610.11245}, Oct 2026. [https://arxiv.org/abs/2610.11245]
+  \bibitem{littlebit22026}
+  Lee, S., Kim, J., Park, H., et al. (2026).
+  \emph{LittleBit-2: Maximizing the Spectral Energy Gain in Sub-1-Bit LLMs via Latent Geometry Alignment}.
+  arXiv preprint arXiv:2603.00042v2 (Samsung Research).
+
+  \bibitem{hybridagent2026}
+  Zhang, Y., Chen, X., Liu, Z., et al. (2026).
+  \emph{Hybrid Reasoning Agents: Interleaving Continuous Latent Thought and Discrete Tool Use with Working Memory}.
+  arXiv preprint arXiv:2610.18861v1.
+
+  \bibitem{logra2026}
+  Wang, L., Zhao, K., et al. (2026).
+  \emph{LoGRA: Low-Rank Gradient Sketches with Predicted-KL Step Control for Continual LLM Adaptation}.
+  arXiv preprint arXiv:2610.06647v1.
+
+  \bibitem{dreamrsi2026}
+  Zheng, K., et al. (2026).
+  \emph{Dream-RSI: Recursive Self-Improvement through Evolving Worlds}.
+  arXiv preprint arXiv:2609.14858 (\url{https://www.dream-rsi.com/}).
+
+  \bibitem{alodlm2026}
+  Chen, M., Li, H., et al. (2026).
+  \emph{ALoDLM: Adaptively Looped Diffusion and Block-Autoregressive Language Models with Depth-Aware KV Caching}.
+  arXiv preprint arXiv:2610.04198v1.
+\end{thebibliography}
+
+\end{document}

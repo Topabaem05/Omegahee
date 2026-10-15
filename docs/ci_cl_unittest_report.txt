@@ -1,0 +1,18 @@
+test_01_littlebit2_joint_itq_and_zero_loss_qat (tests.test_omegahee_ci_cl.TestOmegaheeCICLSuite) ... ok
+test_02_alodlm_weight_sharing_and_depth_aware_kv_cache (tests.test_omegahee_ci_cl.TestOmegaheeCICLSuite) ... ok
+test_03_alodlm_variational_nelbo_and_control_variate (tests.test_omegahee_ci_cl.TestOmegaheeCICLSuite) ... ok
+test_04_hybrid_agent_link_and_working_memory (tests.test_omegahee_ci_cl.TestOmegaheeCICLSuite) ... ok
+test_05_cl_dream_rsi_and_logra_parametric_weight_consolidation (tests.test_omegahee_ci_cl.TestOmegaheeCICLSuite) ... ok
+test_06_lilicorr_and_bytecross_uzu_kernels (tests.test_omegahee_ci_cl.TestOmegaheeCICLSuite) ... ok
+test_07_casa_mean_and_qk_protection (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+test_08_schur_ldl_and_rotation_free_viterbi (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+test_09_stagq_monotone_and_awsrc_energy (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+test_10_dq_and_bytecross (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+test_11_sparsespec_lilicorr_gdn_gumbel (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+test_12_optr_aatc_readkv_memory_roofline (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+test_13_reference_audit_bundle (tests.test_omegahee_pillars.TestOmegaPillars) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.168s
+
+OK

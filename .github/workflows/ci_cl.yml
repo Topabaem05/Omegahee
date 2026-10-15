@@ -1,0 +1,19 @@
+name: Omegahee CI/CL
+
+on:
+  push:
+    branches: [main, feat/omega-uzu-v2]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install numerical dependency
+        run: pip install numpy
+      - name: Mathematical invariant suite
+        run: python -m unittest tests/test_omegahee_ci_cl.py tests/test_omegahee_pillars.py -v
