@@ -510,14 +510,17 @@ class ALoDLMHybridARModel:
         seq_ids: np.ndarray,
         entropy_tau: float = 3.2,
         halt_threshold_q: float = 0.75,
+        use_kv_cache: bool = True,
     ) -> Tuple[np.ndarray, Dict[str, float]]:
         x = seq_ids.copy()
-        kv_cache = DepthAwareKVCache(
-            num_layers=self.total_physical_layers,
-            start_rec=self.n_prelude,
-            end_rec=self.n_prelude + self.n_core_shared,
-            max_depth=self.max_depth,
-        )
+        kv_cache: Optional[DepthAwareKVCache] = None
+        if use_kv_cache:
+            kv_cache = DepthAwareKVCache(
+                num_layers=self.total_physical_layers,
+                start_rec=self.n_prelude,
+                end_rec=self.n_prelude + self.n_core_shared,
+                max_depth=self.max_depth,
+            )
         total_inner_passes = 0
         commit_depths: Dict[int, int] = {}
 
@@ -536,7 +539,9 @@ class ALoDLMHybridARModel:
                 newly_committed = []
                 for idx in list(unresolved):
                     a_cum[idx] = a_cum[idx] + (1.0 - a_cum[idx]) * lambdas[idx]
-                    if entropies[idx] <= entropy_tau:
+                    # Spec: commit when H(p) <= tau_ent OR cumulative halting mass
+                    # sum_{k<=d} q_phi(k) = 1 - prod_{k<=d}(1 - g^(k)) >= q_halt.
+                    if entropies[idx] <= entropy_tau or a_cum[idx] >= halt_threshold_q:
                         pred_tok = int(np.argmax(probs[idx, :-1]))
                         committed_in_step[idx] = pred_tok
                         commit_depths[idx] = s
@@ -550,9 +555,6 @@ class ALoDLMHybridARModel:
                     h[idx] = self.embeddings[tok_id]
 
                 if len(unresolved) == 0:
-                    break
-                mean_a = float(np.mean([a_cum[i] for i in unresolved]))
-                if mean_a >= halt_threshold_q:
                     break
 
             if len(committed_in_step) == 0 and len(unresolved) > 0:
@@ -568,7 +570,7 @@ class ALoDLMHybridARModel:
         stats = {
             "total_inner_passes": float(total_inner_passes),
             "mean_commit_depth": float(np.mean(list(commit_depths.values()))) if commit_depths else 1.0,
-            "logical_kv_pairs": float(kv_cache.total_logical_buffer_pairs()),
+            "logical_kv_pairs": float(kv_cache.total_logical_buffer_pairs()) if kv_cache is not None else 0.0,
         }
         return x, stats
 

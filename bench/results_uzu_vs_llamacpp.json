@@ -1,0 +1,188 @@
+{
+  "hardware": "Intel Xeon (virtualized), 8 vCPU, AVX2/AVX-512, 16 GB RAM, Debian 13, shared VM (noisy)",
+  "uzu": {
+    "repo": "https://github.com/trymirai/uzu",
+    "commit": "ee5ec57 (2026-10-16)",
+    "engine_version": "0.6.8",
+    "build": "cargo +nightly build --release -p cli on x86_64-unknown-linux-gnu (README marks this target 'in progress'); CPU backend; ALSA headers extracted locally for rodio dep",
+    "model": "trymirai/Qwen3.5-0.8B-M (alibaba:qwen3.5:0.8b:mirai:mirai-m:4)",
+    "compute_dtype": "bfloat16",
+    "task": {
+      "identifier": "qwen3.5-0.8b-cpu",
+      "repo_id": "trymirai/Qwen3.5-0.8B-M",
+      "number_of_runs": 2,
+      "tokens_limit": 16,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Write one short sentence about the sea.",
+          "reasoning_content": null
+        }
+      ],
+      "greedy": true,
+      "include_replies": false,
+      "reasoning_effort": "disabled"
+    },
+    "cpu_utilization_note": "~90% of one core observed (single-threaded reference CPU kernels)",
+    "runs": [
+      {
+        "tokens_count_input": 20,
+        "tokens_count_output": 16,
+        "time_to_first_token": 60.754791391,
+        "prompt_tokens_per_second": 0.32919214340291075,
+        "generate_tokens_per_second": 0.21857417374714408
+      },
+      {
+        "tokens_count_input": 20,
+        "tokens_count_output": 16,
+        "time_to_first_token": 60.357132189,
+        "prompt_tokens_per_second": 0.33136100531371787,
+        "generate_tokens_per_second": 0.2221394535587604
+      }
+    ]
+  },
+  "llama_cpp": {
+    "commit": "a8d9a7e",
+    "model": "ggml-org/Qwen3.5-0.8B-GGUF Q4_0 and Q8_0",
+    "runs": [
+      {
+        "run": "run1_t8_pp512_tg128",
+        "model": "qwen35 0.8B Q4_0",
+        "threads": 8,
+        "test": "pp512",
+        "avg_tok_s": 519.095984,
+        "stddev_tok_s": 111.783927,
+        "samples_tok_s": [
+          575.627,
+          574.977,
+          625.752,
+          473.957,
+          345.167
+        ]
+      },
+      {
+        "run": "run1_t8_pp512_tg128",
+        "model": "qwen35 0.8B Q4_0",
+        "threads": 8,
+        "test": "tg128",
+        "avg_tok_s": 20.07878,
+        "stddev_tok_s": 18.948321,
+        "samples_tok_s": [
+          9.17566,
+          10.7001,
+          12.7299,
+          13.9745,
+          53.8138
+        ]
+      },
+      {
+        "run": "run1_t8_pp512_tg128",
+        "model": "qwen35 0.8B Q8_0",
+        "threads": 8,
+        "test": "pp512",
+        "avg_tok_s": 429.547369,
+        "stddev_tok_s": 117.214874,
+        "samples_tok_s": [
+          590.254,
+          484.493,
+          364.552,
+          426.81,
+          281.628
+        ]
+      },
+      {
+        "run": "run1_t8_pp512_tg128",
+        "model": "qwen35 0.8B Q8_0",
+        "threads": 8,
+        "test": "tg128",
+        "avg_tok_s": 66.80614,
+        "stddev_tok_s": 20.087346,
+        "samples_tok_s": [
+          30.8853,
+          76.5317,
+          75.3205,
+          75.2509,
+          76.0423
+        ]
+      },
+      {
+        "run": "run2_t8_tg128",
+        "model": "qwen35 0.8B Q4_0",
+        "threads": 8,
+        "test": "tg128",
+        "avg_tok_s": 89.295045,
+        "stddev_tok_s": 3.260482,
+        "samples_tok_s": [
+          87.6918,
+          89.2316,
+          91.764,
+          84.7994,
+          92.9885
+        ]
+      },
+      {
+        "run": "run2_t8_tg128",
+        "model": "qwen35 0.8B Q8_0",
+        "threads": 8,
+        "test": "tg128",
+        "avg_tok_s": 63.235279,
+        "stddev_tok_s": 23.775373,
+        "samples_tok_s": [
+          73.2913,
+          72.0301,
+          74.3308,
+          75.7494,
+          20.7748
+        ]
+      },
+      {
+        "run": "t1_q8",
+        "model": "qwen35 0.8B Q8_0",
+        "threads": 1,
+        "test": "pp20",
+        "avg_tok_s": 110.687967,
+        "stddev_tok_s": 2.047422,
+        "samples_tok_s": [
+          112.136,
+          109.24
+        ]
+      },
+      {
+        "run": "t1_q8",
+        "model": "qwen35 0.8B Q8_0",
+        "threads": 1,
+        "test": "tg16",
+        "avg_tok_s": 15.224985,
+        "stddev_tok_s": 0.021602,
+        "samples_tok_s": [
+          15.2097,
+          15.2403
+        ]
+      },
+      {
+        "run": "t1_q4",
+        "model": "qwen35 0.8B Q4_0",
+        "threads": 1,
+        "test": "pp20",
+        "avg_tok_s": 104.446685,
+        "stddev_tok_s": 1.528021,
+        "samples_tok_s": [
+          105.527,
+          103.366
+        ]
+      },
+      {
+        "run": "t1_q4",
+        "model": "qwen35 0.8B Q4_0",
+        "threads": 1,
+        "test": "tg16",
+        "avg_tok_s": 19.806308,
+        "stddev_tok_s": 0.54233,
+        "samples_tok_s": [
+          19.4228,
+          20.1898
+        ]
+      }
+    ]
+  }
+}
