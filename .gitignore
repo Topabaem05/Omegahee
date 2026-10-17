@@ -2,3 +2,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+
+# LaTeX build artifacts
+paper/*.log
+paper/*.aux
+paper/*.xdv

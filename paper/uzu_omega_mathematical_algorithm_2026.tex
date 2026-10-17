@@ -9,7 +9,9 @@
 \babelfont{tt}{Noto Sans CJK KR}
 
 \usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
 \usepackage{booktabs,tabularx,array}
+\usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{fancyhdr}
@@ -516,7 +518,7 @@ We implemented the complete $\Omega$-Uzu v2.0 (Omegahee) engine in \texttt{src/o
 \textbf{HybridAgent}~\cite{hybridagent2026} & Zero-Init $\mathcal{R}(h_t)$ \& Cosine \texttt{</latent>} Exit & Exact Token-38 Exit \& KV Memory & \textbf{PASS} \\
 \textbf{Dream-RSI}~\cite{dreamrsi2026} & Monotonic Policy Gain across $\mathcal{H}_1 \dots \mathcal{H}_4$ & $\Delta\text{Score} \ge 0$ all 4 CL rounds & \textbf{PASS} \\
 \textbf{LoGRA Consolidation}~\cite{logra2026} & Sketch Mem \& Predicted-KL $\alpha^2 q(D) \le \delta$ & $18.75\%$ Mem, $\widehat{\mathrm{KL}} \le 3\cdot 10^{-6}$ & \textbf{PASS} \\
-\textbf{ByteCross \& LiLiCorr}~\cite{bytecross2026,lilicorr2026} & Crossover $T^*$ \& Bilinear Tree Verification & $T^* = 7{,}633.5$ tokens & \textbf{PASS} \\
+\textbf{ByteCross \& LiLiCorr}~\cite{lee2026bytecross,rusanovsky2026lilicorr} & Crossover $T^*$ \& Bilinear Tree Verification & $T^* = 7{,}633.5$ tokens & \textbf{PASS} \\
 \textbf{KSC-CurveTQ} & Rotation-free Viterbi $\le$ Euclidean metric, header $14$ bit & $2.38075\text{ bpw}$, traffic $-48.39\%$ & \textbf{PASS} \\
 \textbf{CASA} & $\sum_l P_l b_l^\star / P = \bar{b}$, $W_Q,W_K \ge 3$ & mean $2.40$ bit, Q/K protected & \textbf{PASS} \\
 \textbf{DQ-ODP} & Decode activations stay BF16, ODP ring $= 2$ layers & activation quant off on decode & \textbf{PASS} \\
