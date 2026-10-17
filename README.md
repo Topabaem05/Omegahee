@@ -21,6 +21,9 @@ The numerical kernels are Python. They are the specification check for a later M
 - `paper/` — LaTeX specification and the compiled 14-page PDF. Source and PDF now agree: the CI/CL table carries all 16 pillar-closure rows. Rebuild with `tectonic` after installing the Noto CJK fonts.
 - `docs/plan_completion.md` — equation-to-function checklist.
 - `docs/design_omega_uzu_integration.md` — paper-to-uzu integration design with the measured pass-cost model and next steps.
+- `docs/budget_measurement_20261018.md` — measured tree_budget sweep; the 1.77x prediction
+  from the pass-cost model is not reproduced, and the benchmark spread is larger than the
+  difference between budgets. `tools/uzu_budget_override.py` changes a checkpoint budget.
 - `docs/advisor_review_verification_20261018.md` — external review checked against the code:
   the 64-column encoder claim holds, the GEMV bandwidth correction does not.
 - `docs/problem_report_20261017.md` — open blockers with measurements, and the questions
