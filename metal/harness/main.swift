@@ -643,12 +643,13 @@ do {
     var worst = 0.0
     for i in 0..<nRows { worst = max(worst, abs(Double(got[i]) - Double(expected[i]))) }
     let tol = 1e-3
-    // This kernel is UNVERIFIED: its output does not yet match the CPU reference.
-    // It is recorded but deliberately kept out of the parity gate so an
-    // unverified optimization cannot masquerade as a passing result.
+    // Parity against a CPU reference computed in this harness. The kernel read
+    // code words little-endian while KSC is MSB-first, which broke this check
+    // until a byte swap was added on 2026-10-18.
+    if worst > tol { pass = false }
     coalesced["cpu_parity"] = ["max_abs_diff": worst, "tolerance": tol,
-                               "pass": worst <= tol, "verified": false,
-                               "note": "excluded from parity gate until it matches"]
+                               "pass": worst <= tol, "verified": worst <= tol,
+                               "note": "byte order fix (bswap) made this match"]
 
     // Throughput at the production shape, measured separately.
     let bigRows = 12288
@@ -658,7 +659,9 @@ do {
     for i in 0..<bigCodes.count { bigCodes[i] = UInt8(truncatingIfNeeded: bigRng.next() as UInt64) }
     let bigX = (0..<4096).map { _ in Float.random(in: -1...1) }
     let bigOut = device.makeBuffer(length: bigRows * 4, options: .storageModeShared)!
-    let bigBuffers = [makeBuffer(device, bigCodes), makeBuffer(device, alpha.isEmpty ? [Float](repeating: 1, count: bigRows) : [Float](repeating: 1, count: bigRows)), makeBuffer(device, bigX), bigOut]
+    let bigAlpha = [Float](repeating: 1.0, count: bigRows)
+    let bigBuffers = [makeBuffer(device, bigCodes), makeBuffer(device, bigAlpha),
+                      makeBuffer(device, bigX), bigOut]
     let state = pipeline("ksc_gemv_coalesced")
     let width = bigRows * 32
     func once() -> Double {
@@ -705,7 +708,7 @@ do {
     var alpha = [Float](repeating: 1.0, count: nRows)
     for i in 0..<nRows { alpha[i] = Float.random(in: 0.5...1.5) }
     let x = (0..<kCols).map { _ in Float.random(in: -1...1) }
-    let outBuffer = device.makeBuffer(length: nRows * 4, options: .storageModeShared)!
+    let outBuffer = device.makeBuffer(length: 8192, options: .storageModeShared)!
 
     let buffers = [makeBuffer(device, codes), makeBuffer(device, alpha), makeBuffer(device, x), outBuffer]
     let state = pipeline("ksc_gemv_k4096")

@@ -479,7 +479,10 @@ kernel void ksc_gemv_coalesced(
     const uint word_index = base + lane;
     float s = 0.0f;
     if (word_index < n_words) {
-      const uint w = row[word_index];
+      // Apple GPUs give little-endian uint for a byte pointer cast, while the
+      // KSC layout is MSB-first. Byte-swap so code c is read from bits
+      // [30-2c, 31-2c] of the logical big-endian word.
+      const uint w = __builtin_bswap32(row[word_index]);
       const uint col_base = word_index * 16u;
       for (uint c = 0; c < 16u; ++c) {
         const uint code = (w >> (30u - 2u * c)) & 3u;

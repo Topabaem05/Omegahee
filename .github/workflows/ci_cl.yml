@@ -16,4 +16,4 @@ jobs:
       - name: Install numerical dependency
         run: pip install numpy
       - name: Mathematical invariant suite
-        run: python -m unittest tests/test_omegahee_ci_cl.py tests/test_omegahee_pillars.py tests/test_omegahee_spec_extra.py tests/test_omegahee_metal_reference.py tests/test_spec_budget_sim.py -v
+        run: python -m unittest tests/test_omegahee_ci_cl.py tests/test_omegahee_pillars.py tests/test_omegahee_spec_extra.py tests/test_omegahee_metal_reference.py tests/test_spec_budget_sim.py tests/test_omegahee_ksc_encoder.py tests/test_ksc_word_order.py -v
