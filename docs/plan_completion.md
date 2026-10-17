@@ -82,6 +82,18 @@ What this settles:
   gives a 101.1 tok/s single-pass ceiling. The paper's 64.4 tok/s claim is 64% of
   that, i.e. plausible with headroom rather than tight.
 
+## Update 2026-10-17 (design): measured budget optimum
+
+`docs/design_omega_uzu_integration.md` records the design pass. The short version:
+the shipped `tree_budget: 16` is not the optimum on this machine. Fitting the
+measured pass times (18.19 ms single-token, 47.40 ms at budget 16) gives 16.10 ms
+fixed plus 2.086 ms per draft candidate, and on that model the best budget is 3--4
+for 1.77--2.12x tokens/s. Changing the budget also cannot be done by editing
+`speculator/shapes.json`: the engine deletes a modified file and fails to load.
+
+Tools: `tools/spec_budget_sim.py` (controller vs fixed), `tools/spec_budget_sweep.py`
+(budget sweep). Tests: `tests/test_spec_budget_sim.py`, `tests/test_spec_budget_sweep.py`.
+
 Still open:
 
 - **uzu crate port.** The kernels live in this repository. Adding them to

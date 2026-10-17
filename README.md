@@ -20,6 +20,7 @@ The numerical kernels are Python. They are the specification check for a later M
 - `metal/` — Metal kernel pack and Swift parity/bandwidth harness (see `metal/README.md`).
 - `paper/` — LaTeX specification and the compiled 14-page PDF. Source and PDF now agree: the CI/CL table carries all 16 pillar-closure rows. Rebuild with `tectonic` after installing the Noto CJK fonts.
 - `docs/plan_completion.md` — equation-to-function checklist.
+- `docs/design_omega_uzu_integration.md` — paper-to-uzu integration design with the measured pass-cost model and next steps.
 - `docs/uzu_metal_kernel_mapping.md` — SIMD-group contract for the uzu crates.
 - `.github/workflows/ci_cl.yml` — unittest on `main` and `feat/omega-uzu-v2`.
 
@@ -44,3 +45,18 @@ The recompiled PDF in `paper/` now matches the `.tex` source: 14 pages and all 1
 verification rows. Rebuild it with `tectonic -X compile paper/uzu_omega_mathematical_algorithm_2026.tex`
 after installing the Noto CJK fonts; the source needs `bm` and `enumitem` in addition
 to the original package list.
+
+## Design work
+
+`docs/design_omega_uzu_integration.md` turns the paper's Phase A/B spec into a
+measured plan. Two tools back it:
+
+```bash
+python tools/spec_budget_sim.py     # entropy controller vs the fixed uzu budget
+python tools/spec_budget_sweep.py   # budget sweep against measured pass costs
+```
+
+The pass-cost model is fitted to this machine's measurements: a single-token pass
+takes 18.19 ms and a 16-slot tree verify takes 47.40 ms, so the fit is 16.10 ms
+fixed plus 2.086 ms per draft candidate. On that model the optimal budget is 3--4,
+not the shipped 16, worth 1.77--2.12x tokens/s.
