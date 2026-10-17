@@ -1,123 +1,162 @@
-"""Calibration Hessian support for the KSC encoder."""
+"""Calibration-Hessian curvature for the Omegahee KSC encoder.
+
+The KSC encoder consumes the diagonal ``d`` and unit-lower-triangular ``L``
+from the LDL factorisation ``H = L diag(d) L^T`` of a block Hessian.  Given
+calibration activations ``X`` with shape ``(rows, K)``, this module estimates
+each block Hessian as ``X[:, b*block:(b+1)*block].T @ X[...] / rows`` and
+factors it with the existing :mod:`omegahee_pillars` helpers.
+
+``L = 0`` (and ``d = 1``) is the correct fallback when ``X`` is absent.  It
+reduces the encoder to plain curvature-free 2-bit rounding.  Fabricating a
+nonzero ``L`` is not a substitute for measured curvature: a constant ``L`` was
+measured to make reconstruction worse than ``L = 0`` on a real Qwen3.5-9B
+layer (see ``docs/step1_step2_results_20261018.md``).
+"""
 
 from __future__ import annotations
 
-import importlib.util
-import os
 from typing import Dict, List, Optional
 
 import numpy as np
 
-_ROOT = os.path.dirname(os.path.abspath(__file__))
+from omegahee_ksc_encoder import ksc_curvetq_quantize_block_b64
+from omegahee_pillars import ldl_factor, regularized_schur
 
 
-def _load(name: str, relative: str):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(_ROOT, relative))
-    module = importlib.util.module_from_spec(spec)
-    import sys
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-P = _load("omegahee_pillars", "omegahee_pillars.py")
-E = _load("omegahee_ksc_encoder", "omegahee_ksc_encoder.py")
+def _checked_block(block: int, columns: int) -> int:
+    if isinstance(block, bool) or not isinstance(block, (int, np.integer)):
+        raise ValueError("block must be a positive integer")
+    block = int(block)
+    if block <= 0:
+        raise ValueError("block must be a positive integer")
+    if columns % block != 0:
+        raise ValueError(f"K={columns} must be divisible by block={block}")
+    return block
 
 
 def block_diag_covariance(X: np.ndarray, block: int = 64) -> List[np.ndarray]:
-    """Per-block activation covariance H_b = X_b^T X_b / rows.
+    """Return the per-block activation covariances of ``X``.
 
-    The KSC branch metric is a curvature-weighted distance within one 64-column
-    block, so only the block-diagonal part of the full Hessian is needed.
+    ``X`` has shape ``(rows, K)``.  Entry ``b`` is the float64 matrix
+    ``X_b.T @ X_b / rows`` where ``X_b`` is block ``b`` of ``X``.
     """
     X = np.asarray(X, dtype=np.float64)
     if X.ndim != 2:
-        raise ValueError("X must be 2-D (rows, K)")
-    rows, k = X.shape
-    if block <= 0 or k % block != 0:
-        raise ValueError("K must be divisible by block")
-    out = []
-    for start in range(0, k, block):
-        seg = X[:, start:start + block]
-        out.append(seg.T @ seg / float(rows))
-    return out
+        raise ValueError("X must be a two-dimensional (rows, K) array")
+    rows, columns = X.shape
+    if rows <= 0:
+        raise ValueError("X must contain at least one calibration row")
+    block = _checked_block(block, columns)
+
+    covariances: List[np.ndarray] = []
+    for start in range(0, columns, block):
+        X_block = X[:, start : start + block]
+        covariances.append((X_block.T @ X_block) / float(rows))
+    return covariances
 
 
-def layer_curvature(X: np.ndarray, block: int = 64, lam: float = 1e-4) -> Dict[str, object]:
-    """LDL factorisation per block: H = L diag(d) L^T.
+def layer_curvature(
+    X: np.ndarray,
+    block: int = 64,
+    lam: float = 1e-4,
+) -> Dict[str, List[Dict[str, np.ndarray]]]:
+    """Factor each calibration covariance block into KSC curvature.
 
-    Returns {"blocks": [{"d": ndarray, "L": ndarray}, ...]}. `block` must match
-    the encoder block size (64 for the production layout).
+    Each block first receives ridge regularisation through
+    :func:`omegahee_pillars.regularized_schur`, then an LDL factorisation via
+    :func:`omegahee_pillars.ldl_factor`.  The returned dictionary contains one
+    ``{"d": ndarray, "L": ndarray}`` entry per column block, in column order.
     """
-    covs = block_diag_covariance(X, block)
-    blocks = []
-    for cov in covs:
-        H = P.regularized_schur(cov, block=block, lam=lam)
-        L, d = P.ldl_factor(H)
-        blocks.append({"L": np.asarray(L, dtype=np.float64), "d": np.asarray(d, dtype=np.float64)})
-    return {"blocks": blocks, "block": block, "lam": lam}
+    covariances = block_diag_covariance(X, block)
+    blocks: List[Dict[str, np.ndarray]] = []
+    for covariance in covariances:
+        width = covariance.shape[0]
+        H = regularized_schur(covariance, width, lam)
+        L, d = ldl_factor(H)
+        blocks.append(
+            {
+                "d": np.asarray(d, dtype=np.float64),
+                "L": np.asarray(L, dtype=np.float64),
+            }
+        )
+    return {"blocks": blocks}
 
 
 def quantize_layer_with_hessian(
     W: np.ndarray,
-    X: Optional[np.ndarray],
+    X: Optional[np.ndarray] = None,
     block: int = 64,
     beam_width: int = 8,
     lam: float = 1e-4,
-    max_rows: Optional[int] = None,
-) -> Dict[str, object]:
-    """Quantize a layer with L from real activations, or L=0 when X is absent.
+) -> Dict[str, np.ndarray | float]:
+    """Quantize ``W`` using curvature estimated from calibration activations.
 
-    With X=None this reduces to plain 2-bit rounding under the same codebook,
-    which is the measured correct default: a fabricated L makes reconstruction
-    worse (docs/step1_step2_results_20261018.md).
+    Each ``(N, block)`` slice is encoded by the existing
+    :func:`omegahee_ksc_encoder.ksc_curvetq_quantize_block_b64` with the real
+    ``d`` and ``L`` for that block.  ``scales`` has shape
+    ``(N, K / block)`` with one encoder scale per block.
+
+    If ``X`` is ``None``, curvature is ``d = 1`` and ``L = 0``.  That is the
+    correct fallback when calibration data is absent and reproduces plain
+    curvature-free 2-bit rounding.  If ``X`` is supplied, its column count must
+    match ``W``; ``K`` must also be divisible by ``block``.
     """
     W = np.asarray(W, dtype=np.float64)
     if W.ndim != 2:
-        raise ValueError("W must be 2-D (N, K)")
-    n, k = W.shape
-    if k % block != 0:
-        raise ValueError("K must be divisible by block")
-    rows = n if max_rows is None else min(n, int(max_rows))
-    W = W[:rows]
+        raise ValueError("W must be a two-dimensional (N, K) array")
+    rows, columns = W.shape
+    if rows <= 0 or columns <= 0:
+        raise ValueError("W must have non-zero dimensions")
+    block = _checked_block(block, columns)
+    if block % 64 != 0:
+        raise ValueError("block must be a multiple of 64 for KSC code packing")
 
-    curvature = None
-    if X is not None:
-        curvature = layer_curvature(X, block=block, lam=lam)
+    num_blocks = columns // block
+    if X is None:
+        curvature_blocks: List[Dict[str, np.ndarray]] = [
+            {
+                "d": np.ones(block, dtype=np.float64),
+                "L": np.zeros((block, block), dtype=np.float64),
+            }
+            for _ in range(num_blocks)
+        ]
+    else:
+        X = np.asarray(X, dtype=np.float64)
+        if X.ndim != 2:
+            raise ValueError("X must be a two-dimensional (rows, K) array")
+        if X.shape[1] != columns:
+            raise ValueError(
+                f"X has {X.shape[1]} columns but W has {columns}; "
+                "calibration activations must match the weight input dimension"
+            )
+        curvature_blocks = layer_curvature(X, block=block, lam=lam)["blocks"]
 
-    nblocks = k // block
-    hat = np.empty((rows, k), dtype=np.float64)
-    codes = np.empty((rows, k), dtype=np.uint8)
-    s0 = np.empty((rows, nblocks), dtype=np.uint16)
-    scales = np.empty((rows, nblocks), dtype=np.float64)
+    hat = np.empty((rows, columns), dtype=np.float64)
+    packed_codes = np.empty((rows, columns // 4), dtype=np.uint8)
+    s0_headers = np.empty((rows, num_blocks), dtype=np.uint16)
+    scales = np.empty((rows, num_blocks), dtype=np.float32)
 
-    for b in range(nblocks):
-        start = b * block
-        seg = W[:, start:start + block]
-        if curvature is None:
-            L = np.zeros((block, block), dtype=np.float64)
-            d = np.ones(block, dtype=np.float64)
-        else:
-            entry = curvature["blocks"][b]
-            L = entry["L"]
-            d = entry["d"]
-        out = E.ksc_curvetq_quantize_block_b64(seg, d, L, beam_width=beam_width)
-        hat[:, start:start + block] = out["hat"]
-        codes[:, start:start + block] = out["codes"]
-        packed = np.asarray(out["packed_codes"])
-        if b == 0:
-            packed_all = np.empty((rows, nblocks * 16), dtype=np.uint8)
-        packed_all[:, b * 16:(b + 1) * 16] = packed
-        s0[:, b] = np.asarray(out["s0_headers"])
-        scales[:, b] = np.asarray(out["scales"])
+    for b in range(num_blocks):
+        c0 = b * block
+        c1 = c0 + block
+        curvature = curvature_blocks[b]
+        result = ksc_curvetq_quantize_block_b64(
+            W[:, c0:c1],
+            curvature["d"],
+            curvature["L"],
+            beam_width=beam_width,
+        )
+        hat[:, c0:c1] = result["hat"]
+        packed_codes[:, b * (block // 4) : (b + 1) * (block // 4)] = result[
+            "packed_codes"
+        ]
+        s0_headers[:, b] = result["s0_headers"]
+        scales[:, b] = result["scales"]
 
     return {
         "hat": hat,
-        "codes": codes,
-        "packed_codes": packed_all,
-        "s0_headers": s0,
+        "packed_codes": packed_codes,
+        "s0_headers": s0_headers,
         "scales": scales,
         "mse": float(np.mean((W - hat) ** 2)),
-        "rows": rows,
-        "used_hessian": X is not None,
     }

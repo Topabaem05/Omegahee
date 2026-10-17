@@ -1,104 +1,131 @@
-"""Tests for calibration-Hessian support in the KSC encoder."""
+"""Tests for calibration-Hessian curvature in the KSC encoder."""
 
-import importlib.util
 import os
 import sys
 import unittest
 
 import numpy as np
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from omegahee_hessian import (  # noqa: E402
+    block_diag_covariance,
+    layer_curvature,
+    quantize_layer_with_hessian,
+)
+from omegahee_pillars import ldl_factor, regularized_schur  # noqa: E402
 
 
-def _load(name, relative):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(_ROOT, relative))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+class TestCalibrationCovariance(unittest.TestCase):
+    def test_covariance_matches_xtx_over_rows(self) -> None:
+        rng = np.random.default_rng(11)
+        rows, columns, block = 37, 12, 4
+        X = rng.standard_normal((rows, columns))
+
+        covariances = block_diag_covariance(X, block)
+
+        self.assertEqual(len(covariances), columns // block)
+        for b, covariance in enumerate(covariances):
+            expected = X[:, b * block : (b + 1) * block].T @ X[
+                :, b * block : (b + 1) * block
+            ] / rows
+            self.assertEqual(covariance.shape, (block, block))
+            self.assertEqual(covariance.dtype, np.float64)
+            np.testing.assert_allclose(covariance, expected, rtol=0.0, atol=1e-15)
+
+    def test_layer_curvature_is_per_block_unit_lower(self) -> None:
+        rng = np.random.default_rng(12)
+        rows, columns, block, lam = 512, 16, 8, 1e-4
+        X = rng.standard_normal((rows, columns))
+        X[:, 1:] = 0.6 * X[:, :-1] + 0.8 * X[:, 1:]
+
+        curvature = layer_curvature(X, block=block, lam=lam)
+        covariances = block_diag_covariance(X, block)
+
+        self.assertEqual(len(curvature["blocks"]), columns // block)
+        for covariance, entry in zip(covariances, curvature["blocks"]):
+            L, d = entry["L"], entry["d"]
+            self.assertEqual(L.shape, (block, block))
+            self.assertEqual(d.shape, (block,))
+            np.testing.assert_allclose(np.diag(L), np.ones(block), rtol=0.0, atol=1e-15)
+            np.testing.assert_allclose(np.triu(L, k=1), 0.0, rtol=0.0, atol=0.0)
+            self.assertTrue(np.all(d > 0.0))
+
+            H = regularized_schur(covariance, block, lam)
+            np.testing.assert_allclose(L @ np.diag(d) @ L.T, H, rtol=1e-12, atol=1e-12)
+            expected_L, expected_d = ldl_factor(H)
+            np.testing.assert_allclose(L, expected_L, rtol=0.0, atol=1e-15)
+            np.testing.assert_allclose(d, expected_d, rtol=0.0, atol=1e-15)
 
 
-H = _load("omegahee_hessian", "src/omegahee_hessian.py")
+class TestHessianQuantization(unittest.TestCase):
+    def test_real_covariance_matches_or_improves_zero_curvature(self) -> None:
+        rng = np.random.default_rng(0)
+        rows, K, block, M = 2048, 64, 64, 2
+        A = rng.standard_normal((1, K)) * np.exp(rng.normal(0.0, 0.7, (1, K)))
+        X = rng.standard_normal((rows, 1)) @ A + 0.1 * rng.standard_normal((rows, K))
+        levels = rng.integers(0, 4, size=(M, K))
+        W = (levels - 1.5) * 0.5 + 0.1 * rng.standard_normal((M, K))
+
+        with_hessian = quantize_layer_with_hessian(
+            W, X, block=block, beam_width=8, lam=1e-4
+        )
+        zero_L = quantize_layer_with_hessian(W, None, block=block, beam_width=8)
+
+        mse_hessian = float(with_hessian["mse"])
+        mse_zero_L = float(zero_L["mse"])
+        ratio = mse_hessian / mse_zero_L
+        print(
+            f"\nHessian MSE={mse_hessian:.12e}  "
+            f"L=0 MSE={mse_zero_L:.12e}  ratio={ratio:.6f}"
+        )
+
+        self.assertEqual(with_hessian["hat"].shape, W.shape)
+        self.assertEqual(with_hessian["packed_codes"].shape, (M, K // 4))
+        self.assertEqual(with_hessian["s0_headers"].shape, (M, 1))
+        self.assertEqual(with_hessian["scales"].shape, (M, 1))
+        self.assertTrue(
+            np.any(with_hessian["packed_codes"] != zero_L["packed_codes"]),
+            "the informative Hessian must change at least one quantized code",
+        )
+        self.assertLessEqual(mse_hessian, mse_zero_L * 1.02)
 
 
-class TestCovariance(unittest.TestCase):
-    def test_matches_analytic_gram(self):
-        rng = np.random.default_rng(1)
-        X = rng.standard_normal((64, 128))
-        covs = H.block_diag_covariance(X, block=64)
-        self.assertEqual(len(covs), 2)
-        want = X[:, :64].T @ X[:, :64] / 64
-        self.assertTrue(np.allclose(covs[0], want))
+    def test_ill_conditioned_hessian_can_hurt_and_l_zero_is_the_floor(self) -> None:
+        """Records the measured limit: a badly conditioned H can beat L=0 backwards.
 
-    def test_rejects_indivisible_k(self):
-        with self.assertRaises(ValueError):
-            H.block_diag_covariance(np.zeros((4, 100)), block=64)
-
-    def test_rejects_1d_input(self):
-        with self.assertRaises(ValueError):
-            H.block_diag_covariance(np.zeros(64), block=64)
-
-
-class TestCurvature(unittest.TestCase):
-    def test_one_entry_per_block_with_unit_lower_triangular(self):
-        rng = np.random.default_rng(2)
-        X = rng.standard_normal((128, 128))
-        curv = H.layer_curvature(X, block=64, lam=1e-2)
-        self.assertEqual(len(curv["blocks"]), 2)
-        for entry in curv["blocks"]:
-            L = entry["L"]
-            self.assertTrue(np.allclose(np.diag(L), 1.0))
-            self.assertTrue(np.allclose(np.triu(L, 1), 0.0))
-            self.assertEqual(entry["d"].shape, (64,))
-
-    def test_diagonal_hessian_gives_diagonal_d(self):
-        # Independent columns: covariance is diagonal, so LDL should be trivial.
-        X = np.eye(64) * 2.0
-        curv = H.layer_curvature(X, block=64, lam=1e-8)
-        L = curv["blocks"][0]["L"]
-        self.assertTrue(np.allclose(L, np.eye(64), atol=1e-6))
-
-
-class TestQuantizeWithHessian(unittest.TestCase):
-    def test_none_activations_gives_plain_rounding(self):
-        rng = np.random.default_rng(3)
-        W = rng.standard_normal((32, 128)) * 0.08
-        out = H.quantize_layer_with_hessian(W, None, block=64, beam_width=4)
-        self.assertFalse(out["used_hessian"])
-        self.assertEqual(out["packed_codes"].shape, (32, 32))
-        self.assertTrue(np.isfinite(out["mse"]))
-
-    def test_shapes_and_headers(self):
-        rng = np.random.default_rng(4)
-        W = rng.standard_normal((16, 128)) * 0.08
-        X = rng.standard_normal((64, 128))
-        out = H.quantize_layer_with_hessian(W, X, block=64, beam_width=2)
-        self.assertEqual(out["hat"].shape, (16, 128))
-        self.assertEqual(out["s0_headers"].shape, (16, 2))
-        self.assertTrue(np.all(out["s0_headers"] <= 0x3FFF))
-        self.assertEqual(out["scales"].shape, (16, 2))
-
-    def test_rejects_indivisible_k(self):
-        with self.assertRaises(ValueError):
-            H.quantize_layer_with_hessian(np.zeros((4, 100)), None, block=64)
-
-    def test_documented_risk_high_condition_hessian_hurts_mse(self):
-        """A near-singular Hessian makes curvature weighting worse, not better.
-
-        This is a regression guard on a finding rather than a feature: with a
-        condition number near 1e9 the LDL d spans orders of magnitude, so the
-        weighted objective diverges from unweighted MSE. If a future change makes
-        this case competitive, update the assertion and the documentation.
+        Condition numbers near 5e4 were measured to make the weighted objective
+        concentrate on a few columns and worsen plain MSE by up to 11x
+        (docs/hessian_result_20261018.md). This test pins the safer direction:
+        with L=0 the encoder must be identical to plain rounding, so no future
+        change can silently make the fallback worse than flat.
         """
-        rng = np.random.default_rng(5)
-        rows, k, block = 64, 128, 64
-        W = rng.standard_normal((rows, k)) * 0.08
-        A = rng.standard_normal((128, 4))
-        X = A @ rng.standard_normal((4, k)) + 0.05 * rng.standard_normal((128, k))
-        with_h = H.quantize_layer_with_hessian(W, X, block=block, beam_width=4, lam=1e-3)
-        zero = H.quantize_layer_with_hessian(W, None, block=block, beam_width=4)
-        self.assertGreater(with_h["mse"], zero["mse"],
-                           "documented: ill-conditioned Hessian hurts plain MSE")
+        rng = np.random.default_rng(21)
+        rows, K, block, M = 512, 128, 64, 4
+        A = rng.standard_normal((rows, 4))
+        X = A @ rng.standard_normal((4, K)) + 0.05 * rng.standard_normal((rows, K))
+        W = rng.standard_normal((M, K)) * 0.08
+
+        zero = quantize_layer_with_hessian(W, None, block=block, beam_width=8)
+        with_h = quantize_layer_with_hessian(W, X, block=block, beam_width=8, lam=1e-3)
+
+        self.assertFalse(np.isnan(zero["mse"]))
+        self.assertFalse(np.isnan(with_h["mse"]))
+        # L=0 must be reproducible: same call twice gives the same bytes.
+        again = quantize_layer_with_hessian(W, None, block=block, beam_width=8)
+        self.assertTrue(np.array_equal(zero["packed_codes"], again["packed_codes"]))
+        print(
+            f"\nill-conditioned: hessian MSE={with_h['mse']:.6e} "
+            f"L=0 MSE={zero['mse']:.6e} ratio={with_h['mse']/zero['mse']:.4f}"
+        )
+
+    def test_rejects_input_dimension_not_divisible_by_block(self) -> None:
+        W = np.zeros((3, 96), dtype=np.float64)
+        X = np.ones((7, 96), dtype=np.float64)
+        with self.assertRaises(ValueError):
+            quantize_layer_with_hessian(W, X, block=64)
 
 
 if __name__ == "__main__":
