@@ -33,4 +33,40 @@ The GitHub repository previously contained only `LICENSE`. The bundle implemente
 
 Not claimed: a Metal/Rust port inside `trymirai/uzu`, or a measured TPS on Apple M5. Those remain integration targets. The numbers 148–310 tok/s in the paper are projections, not new device measurements.
 
-Verification on this commit: `python -m unittest tests/test_omegahee_ci_cl.py tests/test_omegahee_pillars.py` — 13 tests, OK.
+Verification on this commit: `python -m unittest tests/test_omegahee_ci_cl.py tests/test_omegahee_pillars.py tests/test_omegahee_spec_extra.py tests/test_omegahee_metal_reference.py` — 38 tests, OK.
+
+## Update 2026-10-17: device measurement layer
+
+The Metal contract now exists in executable, measured form. `metal/` holds a
+standalone kernel pack (`ksc_decode_dot`, `awsrc_dot`, `readkv_prefix_load`,
+`lilicorr_score`, `stream_probe`) and a Swift harness that checks it against the
+numpy twin in `src/omegahee_metal_reference.py`.
+
+| Item | Where | Status |
+|---|---|---|
+| KSC-CurveTQ rotation-free decode kernel | `metal/kernels/omegahee.metal` | parity 1.9e-06, PASS |
+| AWSRC in-register seeded epilogue | same | parity 7.5e-08, PASS |
+| ReadKV bit-plane prefix reader | same | 0 mismatched channels, PASS |
+| LiLiCorr single-pass correlation | same | parity 1.2e-07, PASS |
+| M5 Pro measured bandwidth | `stream_probe` | 267--272 GB/s best of 15 samples |
+| PDF regenerated from the TeX source | `paper/*.pdf` | 14 pages, 16 verification rows |
+
+Roofline consequence: dividing the measured peak by the paper's 2.68 GB
+9B-checkpoint weight traffic gives a ~102 tok/s single-pass ceiling. The paper's
+64.4 tok/s KSC row is ~63% of that ceiling, below the 91.4% bandwidth efficiency
+published for uzu 0.6.2. The paper's number is therefore plausible but untested;
+this pack does not close that gap.
+
+Still open:
+
+- **uzu crate port.** The kernels live in this repository. Adding them to
+  `crates/uzu-engine/src/backends/metal/kernel/` and wiring them into the
+  session pipeline is a separate change. As of uzu `5baa58b7` (2026-10-17) the
+  upstream tree has `gemm_trellis`, `weaver`, and `gdn/tree_verify` kernels but
+  no AWSRC, ReadKV, or LiLiCorr kernel.
+- **Real-checkpoint measurement.** All numbers here come from synthetic inputs.
+  Measuring a Mirai-M checkpoint requires Rust plus a model download and is out
+  of scope for this pack.
+- **MLX comparison numbers.** `bench/bench_mlx.py` is written and syntax-checked
+  but has not been run on this machine, so `bench/results_mlx.json` does not
+  exist yet.

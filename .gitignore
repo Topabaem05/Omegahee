@@ -7,3 +7,6 @@ __pycache__/
 paper/*.log
 paper/*.aux
 paper/*.xdv
+
+# Metal pack build output
+metal/build/

@@ -1,0 +1,272 @@
+{
+  "hardware": {
+    "machine": "arm64",
+    "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+    "python": "3.15.0",
+    "mlx": "0.32.4",
+    "device": "Device(gpu, 0)",
+    "chip": "Apple M5 Pro",
+    "mem_bytes": 51539607552
+  },
+  "mlx_lm": {
+    "path": "mlx_lm.stream_generate",
+    "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+    "prompt_tokens": 512,
+    "prompt_tok_per_s": 11057.469667115116,
+    "generation_tokens": 128,
+    "generation_tok_per_s": 319.9342135199138,
+    "peak_memory_gb": 0.762587116
+  },
+  "decode": [
+    {
+      "path": "ALoDLM adaptive_block_ar_decode (mlx)",
+      "kv_cache": true,
+      "d_model": 32,
+      "seq_len": 32,
+      "masked_tokens": 16,
+      "runs": 637,
+      "sec_per_run": 0.0031417784537115605,
+      "tok_per_s": 5092.6569889415005,
+      "total_inner_passes": 1.0,
+      "mean_commit_depth": 1.0
+    },
+    {
+      "path": "ALoDLM adaptive_block_ar_decode (mlx)",
+      "kv_cache": false,
+      "d_model": 32,
+      "seq_len": 32,
+      "masked_tokens": 16,
+      "runs": 1260,
+      "sec_per_run": 0.0015886397484416467,
+      "tok_per_s": 10071.5092995092,
+      "total_inner_passes": 1.0,
+      "mean_commit_depth": 1.0
+    },
+    {
+      "path": "ALoDLM adaptive_block_ar_decode (mlx)",
+      "kv_cache": true,
+      "d_model": 128,
+      "seq_len": 32,
+      "masked_tokens": 16,
+      "runs": 602,
+      "sec_per_run": 0.003323511973443438,
+      "tok_per_s": 4814.184551717638,
+      "total_inner_passes": 1.0,
+      "mean_commit_depth": 1.0
+    },
+    {
+      "path": "ALoDLM adaptive_block_ar_decode (mlx)",
+      "kv_cache": false,
+      "d_model": 128,
+      "seq_len": 32,
+      "masked_tokens": 16,
+      "runs": 1143,
+      "sec_per_run": 0.0017540375835507496,
+      "tok_per_s": 9121.811385369938,
+      "total_inner_passes": 1.0,
+      "mean_commit_depth": 1.0
+    }
+  ],
+  "littlebit2": [
+    {
+      "path": "fp32 dense W",
+      "m": 512,
+      "n": 512,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 11659,
+      "tok_per_s": 7772.030225737021
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 512,
+      "n": 512,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 9008,
+      "tok_per_s": 6005.173363571427
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 2048,
+      "n": 2048,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 7392,
+      "tok_per_s": 4927.551458229992
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 2048,
+      "n": 2048,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 8792,
+      "tok_per_s": 5860.811232737166
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 2048,
+      "n": 2048,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 4873,
+      "tok_per_s": 207905.5938056159
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 2048,
+      "n": 2048,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 5030,
+      "tok_per_s": 214609.7864069972
+    }
+  ],
+  "littlebit2_qwen_dims": [
+    {
+      "path": "fp32 dense W",
+      "m": 896,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 11302,
+      "tok_per_s": 7534.458630113272
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 896,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 8616,
+      "tok_per_s": 5743.970001180557
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 896,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 9232,
+      "tok_per_s": 393884.30066294305
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 896,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 5954,
+      "tok_per_s": 254010.97257962706
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 128,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 10679,
+      "tok_per_s": 7119.186203469852
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 128,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 9519,
+      "tok_per_s": 6345.970740838149
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 128,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 9639,
+      "tok_per_s": 411255.08946904755
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 128,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 7280,
+      "tok_per_s": 310595.7587947663
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 4864,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 7463,
+      "tok_per_s": 4975.173577111733
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 4864,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 8955,
+      "tok_per_s": 5969.787407927413
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 4864,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 4739,
+      "tok_per_s": 202165.57649599912
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 4864,
+      "n": 896,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 6291,
+      "tok_per_s": 268401.5807573676
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 896,
+      "n": 4864,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 7864,
+      "tok_per_s": 5242.349067606743
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 896,
+      "n": 4864,
+      "rank": 16,
+      "batch_tokens": 1,
+      "runs": 9193,
+      "tok_per_s": 6127.328356184045
+    },
+    {
+      "path": "fp32 dense W",
+      "m": 896,
+      "n": 4864,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 4868,
+      "tok_per_s": 207663.71158649152
+    },
+    {
+      "path": "LittleBit-2 factored sign path (rank r, unpacked fp32)",
+      "m": 896,
+      "n": 4864,
+      "rank": 16,
+      "batch_tokens": 64,
+      "runs": 2974,
+      "tok_per_s": 126813.9372137447
+    }
+  ]
+}

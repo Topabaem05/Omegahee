@@ -14,7 +14,11 @@ The numerical kernels are Python. They are the specification check for a later M
   - **Pillar 4.** OptR key centering (softmax unchanged), AATC reverse water-filling, ReadKV prefix allocation.
 - `tests/test_omegahee_ci_cl.py` — original 6 invariant tests.
 - `tests/test_omegahee_pillars.py` — pillar closure tests.
-- `paper/` — LaTeX specification and the 13-page PDF of the October typeset. The `.tex` source contains the later verification rows; the PDF does not, until recompiled with XeLaTeX and a CJK font.
+- `tests/test_omegahee_spec_extra.py` — spec-conformance tests from the TeX source.
+- `tests/test_omegahee_metal_reference.py` — Metal-pack reference semantics (bit packing, prefix budgets, correlation bounds).
+- `src/omegahee_metal_reference.py` — numpy twin of the Metal kernels; also the vector generator's source of truth.
+- `metal/` — Metal kernel pack and Swift parity/bandwidth harness (see `metal/README.md`).
+- `paper/` — LaTeX specification and the compiled 14-page PDF. Source and PDF now agree: the CI/CL table carries all 16 pillar-closure rows. Rebuild with `tectonic` after installing the Noto CJK fonts.
 - `docs/plan_completion.md` — equation-to-function checklist.
 - `docs/uzu_metal_kernel_mapping.md` — SIMD-group contract for the uzu crates.
 - `.github/workflows/ci_cl.yml` — unittest on `main` and `feat/omega-uzu-v2`.
@@ -23,8 +27,20 @@ The numerical kernels are Python. They are the specification check for a later M
 
 ```bash
 pip install -r requirements.txt
-python -m unittest tests/test_omegahee_ci_cl.py tests/test_omegahee_pillars.py -v
+python -m unittest discover -s tests -v
 python src/omegahee_uzu_engine.py
 ```
 
-13 tests, all required to pass. Latest local run: LittleBit-2 L2L loss −99.95% with 98.44% top-1 agreement; pillar audit traffic reduction 48.39%; single-pass roofline factor 2.391×; GDN chain match; OptR softmax error ~1e-16.
+38 tests, all required to pass. Latest local run: LittleBit-2 L2L loss −99.95% with 98.44% top-1 agreement; pillar audit traffic reduction 48.39%; single-pass roofline factor 2.391×; GDN chain match; OptR softmax error ~1e-16; Metal parity 4/4.
+
+On an Apple Silicon machine the device layer also runs:
+
+```bash
+bash metal/run.sh        # Metal parity + measured bandwidth, writes metal/build/report.json
+python metal/tools/roofline.py   # turns the measured bandwidth into paper accounting
+```
+
+The recompiled PDF in `paper/` now matches the `.tex` source: 14 pages and all 16
+verification rows. Rebuild it with `tectonic -X compile paper/uzu_omega_mathematical_algorithm_2026.tex`
+after installing the Noto CJK fonts; the source needs `bm` and `enumitem` in addition
+to the original package list.
