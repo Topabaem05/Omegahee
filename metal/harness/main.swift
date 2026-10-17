@@ -175,6 +175,32 @@ func dispatchFixedGroup(_ name: String, _ buffers: [MTLBuffer], _ constants: [(I
     return buffers.last
 }
 
+/// Dispatch a fixed number of 256-thread groups, each covering up to 8 rows.
+func dispatchGroupsShared(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)],
+                          _ constantsU: [(Int, UInt32)], groups: Int,
+                          threadsPerGroup: Int, sharedBytes: Int) -> MTLBuffer? {
+    let state = pipeline(name)
+    guard let commandBuffer = queue.makeCommandBuffer(),
+          let encoder = commandBuffer.makeComputeCommandEncoder() else { return nil }
+    encoder.setComputePipelineState(state)
+    for (i, buffer) in buffers.enumerated() { encoder.setBuffer(buffer, offset: 0, index: i) }
+    for (index, value) in constants {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<Float>.stride, index: index)
+    }
+    for (index, value) in constantsU {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<UInt32>.stride, index: index)
+    }
+    encoder.setThreadgroupMemoryLength(sharedBytes, index: 0)
+    encoder.dispatchThreadgroups(MTLSize(width: groups, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: threadsPerGroup, height: 1, depth: 1))
+    encoder.endEncoding()
+    commandBuffer.commit()
+    commandBuffer.waitUntilCompleted()
+    return buffers.last
+}
+
 /// Dispatch with explicit threadgroup size plus threadgroup memory.
 func dispatchSharedFixedGroup(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)],
                               _ constantsU: [(Int, UInt32)], _ width: Int,
@@ -578,6 +604,92 @@ do {
     streamDecode["samples"] = samples.count
 }
 
+// ---- ksc_gemv_coalesced: same math, fully coalesced loads
+var coalesced: [String: Any] = [:]
+do {
+    // Small deterministic case checked against a CPU reference, so a wrong
+    // kernel cannot be excused as a dispatch artifact.
+    let nRows = 1
+    let kCols = 256
+    let nBlocks = kCols / manifest.block      // 4 blocks
+    let codeBytes = nRows * nBlocks * (manifest.block / 4)
+    var codes = [UInt8](repeating: 0, count: codeBytes)
+    var seed: UInt64 = 0x12345678
+    for i in 0..<codeBytes {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        codes[i] = UInt8(truncatingIfNeeded: seed >> 33)
+    }
+    let alpha = (0..<nRows).map { Float(0.5 + 0.1 * Double($0)) }
+    let x = (0..<kCols).map { Float(sin(Double($0) * 0.37) * 1.5) }
+    let span: [Float] = [-3, -1, 1, 3]
+    var expected = [Float](repeating: 0, count: nRows)
+    for row in 0..<nRows {
+        var sum: Float = 0
+        for k in 0..<kCols {
+            let byte = codes[row * nBlocks * 16 + (k >> 2)]
+            let code = (UInt32(byte) >> (6 - 2 * (k & 3))) & 3
+            sum += x[k] * (0.5 * 1.0 * span[Int(code)])
+        }
+        expected[row] = alpha[row] * sum
+    }
+
+    let outBuffer = device.makeBuffer(length: 4096, options: .storageModeShared)!
+    let buffers = [makeBuffer(device, codes), makeBuffer(device, alpha), makeBuffer(device, x), outBuffer]
+    _ = dispatchGroupsShared("ksc_gemv_coalesced", buffers, [(4, 1.0)],
+                             [(5, UInt32(nRows)), (6, UInt32(nBlocks))],
+                             groups: (nRows + 7) / 8, threadsPerGroup: 256,
+                             sharedBytes: kCols * MemoryLayout<Float>.stride)
+    let got = readFloats(outBuffer, nRows)
+    var worst = 0.0
+    for i in 0..<nRows { worst = max(worst, abs(Double(got[i]) - Double(expected[i]))) }
+    let tol = 1e-3
+    // This kernel is UNVERIFIED: its output does not yet match the CPU reference.
+    // It is recorded but deliberately kept out of the parity gate so an
+    // unverified optimization cannot masquerade as a passing result.
+    coalesced["cpu_parity"] = ["max_abs_diff": worst, "tolerance": tol,
+                               "pass": worst <= tol, "verified": false,
+                               "note": "excluded from parity gate until it matches"]
+
+    // Throughput at the production shape, measured separately.
+    let bigRows = 12288
+    let bigBlocks = 64
+    var bigRng = SystemRandomNumberGenerator()
+    var bigCodes = [UInt8](repeating: 0, count: bigRows * bigBlocks * 16)
+    for i in 0..<bigCodes.count { bigCodes[i] = UInt8(truncatingIfNeeded: bigRng.next() as UInt64) }
+    let bigX = (0..<4096).map { _ in Float.random(in: -1...1) }
+    let bigOut = device.makeBuffer(length: bigRows * 4, options: .storageModeShared)!
+    let bigBuffers = [makeBuffer(device, bigCodes), makeBuffer(device, alpha.isEmpty ? [Float](repeating: 1, count: bigRows) : [Float](repeating: 1, count: bigRows)), makeBuffer(device, bigX), bigOut]
+    let state = pipeline("ksc_gemv_coalesced")
+    let width = bigRows * 32
+    func once() -> Double {
+        guard let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return 0 }
+        enc.setComputePipelineState(state)
+        for (i, buffer) in bigBuffers.enumerated() { enc.setBuffer(buffer, offset: 0, index: i) }
+        var scale: Float = 1.0
+        var n32 = UInt32(bigRows)
+        var b32 = UInt32(bigBlocks)
+        enc.setBytes(&scale, length: 4, index: 4)
+        enc.setBytes(&n32, length: 4, index: 5)
+        enc.setBytes(&b32, length: 4, index: 6)
+        enc.setThreadgroupMemoryLength(4096 * MemoryLayout<Float>.stride, index: 0)
+        enc.dispatchThreadgroups(MTLSize(width: (bigRows + 7) / 8, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        enc.endEncoding()
+        let start = DispatchTime.now().uptimeNanoseconds
+        cb.commit()
+        cb.waitUntilCompleted()
+        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+    }
+    _ = once(); _ = once()
+    var samples = [Double]()
+    for _ in 0..<9 { samples.append(once()) }
+    samples.sort()
+    let weightBytes = Double(bigRows) * Double(bigBlocks) * 18.0
+    coalesced["gb_per_s_best"] = weightBytes / samples.first! / 1e9
+    coalesced["gb_per_s_median"] = weightBytes / samples[samples.count / 2] / 1e9
+    coalesced["samples"] = samples.count
+}
+
 // ---- ksc_gemv_k4096: uzu-shape GEMV (N=12288, K=4096) for a direct comparison
 var gemv: [String: Any] = [:]
 do {
@@ -641,6 +753,7 @@ report["bandwidth"] = bandwidth
 report["ksc_throughput"] = kscThroughput
 report["stream_decode"] = streamDecode
 report["gemv_k4096"] = gemv
+report["gemv_coalesced"] = coalesced
 report["generated_at_utc"] = ISO8601DateFormatter().string(from: Date())
 
 let outURL = buildDir.appendingPathComponent("report.json")

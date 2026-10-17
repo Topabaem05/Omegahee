@@ -428,6 +428,76 @@ kernel void ksc_gemv_k4096(
 }
 
 /*
+ * KSC GEMV with coalesced loads and a fixed threadgroup geometry.
+ *
+ * Contract: one 256-thread threadgroup holds 8 SIMD groups. Simdgroup s of the
+ * group handles output row `group * 8 + s`. Staging always uses all 256 threads,
+ * because the whole x vector is shared by every row in the group.
+ *
+ * Two bugs this design fixes, both found by CPU parity on a one-row case:
+ *  1. the staging stride was hardcoded to 256 while some dispatches had fewer
+ *     threads, leaving tail entries of shared_x uninitialized;
+ *  2. rows were indexed by gid/32 while the group was 256 threads, so the eight
+ *     simdgroups in a group raced on the same output slot.
+ *
+ * Lane l of simdgroup s loads word (base + l) of the row: 4 bytes, 16 codes.
+ * Thirty-two lanes therefore move 128 contiguous bytes per step, which is the
+ * point of this kernel versus the one-byte-per-lane version.
+ */
+kernel void ksc_gemv_coalesced(
+    const device uchar* codes [[buffer(0)]],
+    const device float* alpha [[buffer(1)]],
+    const device float* x [[buffer(2)]],
+    device float* out [[buffer(3)]],
+    constant float& scale [[buffer(4)]],
+    constant uint& n_rows [[buffer(5)]],
+    constant uint& n_blocks [[buffer(6)]],
+    threadgroup float* shared_x [[threadgroup(0)]],
+    const uint group [[threadgroup_position_in_grid]],
+    const uint lid [[thread_position_in_threadgroup]],
+    const uint lane [[thread_index_in_simdgroup]],
+    const uint sg [[simdgroup_index_in_threadgroup]]
+) {
+  const uint k_dim = n_blocks * OMEGA_BLOCK;
+  // All 256 threads stage the shared activation vector.
+  for (uint i = lid; i < k_dim; i += 256u) {
+    shared_x[i] = x[i];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint row_index = group * 8u + sg;
+  if (row_index >= n_rows) {
+    return;
+  }
+
+  const uint n_words = n_blocks * 4u;
+  const device uint* row = reinterpret_cast<const device uint*>(
+      codes + row_index * n_blocks * (OMEGA_BLOCK / 4u));
+
+  float partial = 0.0f;
+  for (uint base = 0; base < n_words; base += 32u) {
+    const uint word_index = base + lane;
+    float s = 0.0f;
+    if (word_index < n_words) {
+      const uint w = row[word_index];
+      const uint col_base = word_index * 16u;
+      for (uint c = 0; c < 16u; ++c) {
+        const uint code = (w >> (30u - 2u * c)) & 3u;
+        s += shared_x[col_base + c] * omega_codebook(code, scale);
+      }
+    }
+    partial += s;
+  }
+
+  for (uint offset = 16u; offset > 0u; offset >>= 1u) {
+    partial += simd_shuffle_xor(partial, offset);
+  }
+  if (lane == 0u) {
+    out[row_index] = alpha[row_index] * partial;
+  }
+}
+
+/*
  * KSC decode throughput probe.
  *
  * Runs the real trellis decode (not a synthetic stream) over `rows` block rows
