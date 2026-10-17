@@ -57,6 +57,31 @@ Roofline consequence: dividing the measured peak by the paper's 2.68 GB
 published for uzu 0.6.2. The paper's number is therefore plausible but untested;
 this pack does not close that gap.
 
+## Update 2026-10-17 (later): uzu baseline measured on this M5 Pro
+
+The prebuilt uzu 0.6.9 release binary was used, so no Rust toolchain was needed.
+`bench/results_uzu_mac.json` holds the numbers and the cross-check against the
+paper's projection table.
+
+| Path | Qwen3.5-9B-M | Qwen3.5-0.8B-M |
+|---|---|---|
+| greedy `bench`, speculation off | 50.3--68.2 tok/s, 6.22 GB | 175.8--332.4 tok/s, 0.56 GB |
+| conversational, DFlash speculator on | 55.1--71.2 tok/s, 5.79 GB | 318.6 tok/s, 0.51 GB |
+
+What this settles:
+
+- The paper's 5.19 GB weight assumption for the 9B checkpoint is exact:
+  `model.safetensors` is 5,189,121,136 bytes.
+- Speculative decode leaves bandwidth idle. The speculator path moves 109--119 GB/s
+  of weights against a measured 270.9 GB/s peak, so 56--60% of the device bandwidth
+  is unused during decoding. That is the opportunity the paper's pillar set targets.
+- Two of the paper's three baseline diagnostics reproduce in the shipped artifacts:
+  `speculator/shapes.json` pins `tree_budget: 16` for every Apple chip, and the 9B
+  checkpoint carries a 755 MB DFlash draft model (the 0.8B carries none).
+- Roofline cross-check: a 2.38075 bpw 9B checkpoint is 2.678 GB, so the measured peak
+  gives a 101.1 tok/s single-pass ceiling. The paper's 64.4 tok/s claim is 64% of
+  that, i.e. plausible with headroom rather than tight.
+
 Still open:
 
 - **uzu crate port.** The kernels live in this repository. Adding them to
@@ -64,9 +89,7 @@ Still open:
   session pipeline is a separate change. As of uzu `5baa58b7` (2026-10-17) the
   upstream tree has `gemm_trellis`, `weaver`, and `gdn/tree_verify` kernels but
   no AWSRC, ReadKV, or LiLiCorr kernel.
-- **Real-checkpoint measurement.** All numbers here come from synthetic inputs.
-  Measuring a Mirai-M checkpoint requires Rust plus a model download and is out
-  of scope for this pack.
-- **MLX comparison numbers.** `bench/bench_mlx.py` is written and syntax-checked
-  but has not been run on this machine, so `bench/results_mlx.json` does not
-  exist yet.
+- **End-to-end quality measurement.** Parity and TPS are measured; perplexity or
+  task accuracy under a 2.38 bpw checkpoint is not.
+- **Larger-model baseline.** 27B was not downloaded; disk headroom on this machine
+  was 7.3 GB at the end of the 9B work.
