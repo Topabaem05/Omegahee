@@ -149,6 +149,35 @@ func dispatch(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)
     return buffers.last
 }
 
+/// Dispatch with a threadgroup-memory pointer at index 8 for the KSC decode
+/// family, which stages beta and x in 2 * OMEGA_BLOCK floats.
+func dispatchShared(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)],
+                    _ constantsU: [(Int, UInt32)], _ width: Int,
+                    sharedBytes: Int) -> MTLBuffer? {
+    let state = pipeline(name)
+    guard let commandBuffer = queue.makeCommandBuffer(),
+          let encoder = commandBuffer.makeComputeCommandEncoder() else { return nil }
+    encoder.setComputePipelineState(state)
+    for (i, buffer) in buffers.enumerated() { encoder.setBuffer(buffer, offset: 0, index: i) }
+    for (index, value) in constants {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<Float>.stride, index: index)
+    }
+    for (index, value) in constantsU {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<UInt32>.stride, index: index)
+    }
+    encoder.setThreadgroupMemoryLength(sharedBytes, index: 0)
+    let w = state.threadExecutionWidth
+    let h = max(state.maxTotalThreadsPerThreadgroup / w, 1)
+    encoder.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
+    encoder.endEncoding()
+    commandBuffer.commit()
+    commandBuffer.waitUntilCompleted()
+    return buffers.last
+}
+
 var report: [String: Any] = [:]
 var parity: [String: Any] = [:]
 var pass = true
@@ -259,6 +288,67 @@ do {
 
 // ---- stream_probe (achievable bandwidth)
 var bandwidth: [String: Any] = [:]
+// ---- ksc_throughput (real trellis decode rate)
+var kscThroughput: [String: Any] = [:]
+do {
+    // 1 MiB of packed weights per pass: 64 Ki block rows. Larger than any SLC
+    // slice for one pass, small enough to hold several passes in flight.
+    let rows = 1 << 16
+    let passes: UInt32 = 64
+    var rng = SystemRandomNumberGenerator()
+    var s0 = [UInt16](repeating: 0, count: rows)
+    for i in 0..<rows { s0[i] = UInt16(truncatingIfNeeded: rng.next() as UInt64) }
+    var codes = [UInt8](repeating: 0, count: rows * manifest.block / 4)
+    for i in 0..<codes.count { codes[i] = UInt8(truncatingIfNeeded: rng.next() as UInt64) }
+    var alpha = [Float](repeating: 1.0, count: rows)
+    for i in 0..<rows { alpha[i] = Float.random(in: 0.5...1.5) }
+    let beta = (0..<manifest.block).map { _ in Float.random(in: -1...1) }
+    let x = (0..<manifest.block).map { _ in Float.random(in: -1...1) }
+
+    let outBuffer = device.makeBuffer(length: rows * 4, options: .storageModeShared)!
+    let buffers = [makeBuffer(device, s0), makeBuffer(device, codes), makeBuffer(device, alpha),
+                   makeBuffer(device, beta), makeBuffer(device, x), outBuffer]
+    let state = pipeline("ksc_throughput")
+
+    func once() -> Double {
+        guard let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return 0 }
+        enc.setComputePipelineState(state)
+        for (i, buffer) in buffers.enumerated() { enc.setBuffer(buffer, offset: 0, index: i) }
+        var scale: Float = 1.0
+        var r32 = UInt32(rows)
+        var p32 = passes
+        enc.setBytes(&scale, length: 4, index: 6)
+        enc.setBytes(&r32, length: 4, index: 7)
+        enc.setBytes(&p32, length: 4, index: 9)
+        enc.setThreadgroupMemoryLength(2 * manifest.block * MemoryLayout<Float>.stride, index: 0)
+        let w = state.threadExecutionWidth
+        let h = max(state.maxTotalThreadsPerThreadgroup / w, 1)
+        enc.dispatchThreads(MTLSize(width: rows, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
+        enc.endEncoding()
+        let start = DispatchTime.now().uptimeNanoseconds
+        cb.commit()
+        cb.waitUntilCompleted()
+        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+    }
+    _ = once(); _ = once()
+    var samples = [Double]()
+    for _ in 0..<9 { samples.append(once()) }
+    samples.sort()
+    let best = samples.first!
+    let median = samples[samples.count / 2]
+    // 18 bytes of weight payload per row: 16 code bytes, 2 header bytes.
+    // alpha/beta/x are activation-side and deliberately not counted.
+    let weightBytes = Double(rows) * 18.0 * Double(passes)
+    kscThroughput["rows"] = rows
+    kscThroughput["passes"] = Int(passes)
+    kscThroughput["weight_bytes"] = Int(weightBytes)
+    kscThroughput["gb_per_s_best"] = weightBytes / best / 1e9
+    kscThroughput["gb_per_s_median"] = weightBytes / median / 1e9
+    kscThroughput["samples"] = samples.count
+
+}
+
 do {
     // 512 MiB is well past the SLC, so the probe measures DRAM streaming rather
     // than cache hits. Four passes keep the run near 20 ms, long enough to beat
@@ -269,7 +359,9 @@ do {
     guard let src = device.makeBuffer(length: bytes, options: .storageModePrivate) else {
         fail("stream buffer allocation failed")
     }
-    let threads = 1 << 16
+    // More threads and a deeper grid keep the device saturated; the earlier
+    // 64K-thread version came in below what uzu achieves in real decode.
+    let threads = 1 << 18
     let outBuffer = device.makeBuffer(length: threads * 4, options: .storageModeShared)!
     let state = pipeline("stream_probe")
     // warm-up
@@ -326,6 +418,7 @@ report["device"] = device.name
 report["parity"] = parity
 report["parity_all_pass"] = pass
 report["bandwidth"] = bandwidth
+report["ksc_throughput"] = kscThroughput
 report["generated_at_utc"] = ISO8601DateFormatter().string(from: Date())
 
 let outURL = buildDir.appendingPathComponent("report.json")

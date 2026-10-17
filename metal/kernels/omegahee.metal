@@ -58,6 +58,36 @@ static inline uint omega_pair(const device uchar* row, uint index) {
  * loop: rotation_applied stays false, which is the KSC-CurveTQ claim under
  * test.
  */
+/* Load one 16-byte row of MSB-first code bits into four words. */
+static inline void omega_load_row(const device uchar* row, thread uint* words) {
+  for (uint w = 0; w < 4u; ++w) {
+    const device uchar* p = row + w * 4u;
+    words[w] = (uint(p[0]) << 24) | (uint(p[1]) << 16) | (uint(p[2]) << 8) | uint(p[3]);
+  }
+}
+
+/* Bit `index` of a register-resident row, MSB-first. */
+static inline uint omega_row_bit(const thread uint* words, uint index) {
+  return (words[index >> 5] >> (31u - (index & 31u))) & 1u;
+}
+
+static inline uint omega_row_pair(const thread uint* words, uint index) {
+  return (omega_row_bit(words, index) << 1) | omega_row_bit(words, index + 1u);
+}
+
+/*
+ * One thread accumulates one output row of a 64-column block.
+ *
+ *   out[row] = sum_j alpha[row] * beta[j] * codebook[code_j] * x[j]
+ *
+ * The 14-bit start state carries the first seven codes; stream bit 14 feeds the
+ * eighth. The row codes are loaded into registers once, so the inner loop is
+ * register-only: the trellis state shift is a dependency chain, not a load
+ * stall. beta and x arrive through threadgroup memory.
+ *
+ * No Hadamard transform or un-rotation is applied anywhere in the hot loop:
+ * rotation_applied stays false, which is the KSC-CurveTQ claim under test.
+ */
 kernel void ksc_decode_dot(
     const device ushort* s0 [[buffer(0)]],
     const device uchar* codes [[buffer(1)]],
@@ -75,13 +105,11 @@ kernel void ksc_decode_dot(
   const uint state_start = uint(s0[gid]) & OMEGA_CODE_MASK;
   const device uchar* row = codes + gid * (OMEGA_BLOCK / 4u);
   const float a = alpha[gid];
-
   float acc = 0.0f;
   uint state = state_start;
   for (uint j = 0; j < OMEGA_BLOCK; ++j) {
     const uint code = (state >> 12) & 3u;
-    const float q = omega_codebook(code, scale);
-    acc += a * beta[j] * q * x[j];
+    acc += a * beta[j] * omega_codebook(code, scale) * x[j];
     state = ((state << 2) | omega_pair(row, OMEGA_HEADER_BITS + 2u * j)) & OMEGA_CODE_MASK;
   }
   out[gid] = acc;
@@ -214,4 +242,58 @@ kernel void stream_probe(
     }
   }
   out[tid] = acc;
+}
+
+/*
+ * KSC decode throughput probe.
+ *
+ * Runs the real trellis decode (not a synthetic stream) over `rows` block rows
+ * `passes` times, so the reported rate is the weight bytes per second the KSC
+ * kernel actually sustains. Each row reads a 14-bit start state, 16 code bytes,
+ * a per-row alpha, and shares beta and x vectors; the kernel writes one float.
+ *
+ * Weight bytes per row = 16 code bytes + 4 bytes alpha + 2 bytes s0 header.
+ */
+kernel void ksc_throughput(
+    const device ushort* s0 [[buffer(0)]],
+    const device uchar* codes [[buffer(1)]],
+    const device float* alpha [[buffer(2)]],
+    const device float* beta [[buffer(3)]],
+    const device float* x [[buffer(4)]],
+    device float* out [[buffer(5)]],
+    constant float& scale [[buffer(6)]],
+    constant uint& rows [[buffer(7)]],
+    constant uint& passes [[buffer(9)]],
+    threadgroup float* shared [[threadgroup(0)]],
+    const uint lid [[thread_position_in_threadgroup]],
+    const uint gid [[thread_position_in_grid]]
+) {
+  if (lid < OMEGA_BLOCK) {
+    shared[lid] = beta[lid];
+  } else if (lid < 2u * OMEGA_BLOCK) {
+    shared[lid] = x[lid - OMEGA_BLOCK];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (gid >= rows) {
+    return;
+  }
+  const uint state_start = uint(s0[gid]) & OMEGA_CODE_MASK;
+  const device uchar* row = codes + gid * (OMEGA_BLOCK / 4u);
+  const float a = alpha[gid];
+  uint words[4];
+  omega_load_row(row, words);
+
+  float total = 0.0f;
+  for (uint pass = 0; pass < passes; ++pass) {
+    float acc = 0.0f;
+    uint state = state_start;
+    for (uint j = 0; j < OMEGA_BLOCK; ++j) {
+      const uint code = (state >> 12) & 3u;
+      acc += a * shared[j] * omega_codebook(code, scale) * shared[OMEGA_BLOCK + j];
+      state = ((state << 2) | omega_row_pair(words, OMEGA_HEADER_BITS + 2u * j)) & OMEGA_CODE_MASK;
+    }
+    total += acc;
+  }
+  out[gid] = total;
 }
