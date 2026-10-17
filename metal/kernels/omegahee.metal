@@ -245,6 +245,189 @@ kernel void stream_probe(
 }
 
 /*
+ * KSC decode with SIMD-group cooperation (the port target).
+ *
+ * Grid layout: 256-thread threadgroups holding 8 SIMD groups; each SIMD group
+ * owns one output row. Lane l of a group reads nibble l of that row: the high
+ * nibble of byte l/2 for even l, the low nibble for odd l, giving columns 2l
+ * and 2l+1.
+ *
+ * Verified property (src/omegahee_metal_reference.py, parity test): the KSC
+ * code stream decodes by direct random access, so the serial trellis walk the
+ * scalar reference performs is not required to decode a column.
+ *
+ * beta and x are activation-side vectors shared by every row, so they are
+ * staged once per threadgroup into threadgroup memory. Reading them directly
+ * from device memory cost 512 bytes per row in the first version of this
+ * kernel, which measured slower than the scalar path.
+ */
+kernel void ksc_decode_simd(
+    const device ushort* s0 [[buffer(0)]],
+    const device uchar* codes [[buffer(1)]],
+    const device float* alpha [[buffer(2)]],
+    const device float* beta [[buffer(3)]],
+    const device float* x [[buffer(4)]],
+    device float* out [[buffer(5)]],
+    constant float& scale [[buffer(6)]],
+    constant uint& rows [[buffer(7)]],
+    threadgroup float* shared [[threadgroup(0)]],
+    const uint gid [[thread_position_in_grid]],
+    const uint lid [[thread_position_in_threadgroup]],
+    const uint lane [[thread_index_in_simdgroup]],
+    const uint sg [[simdgroup_index_in_threadgroup]]
+) {
+  // Stage beta (first 64 floats) and x (next 64) once per threadgroup.
+  if (lid < OMEGA_BLOCK) {
+    shared[lid] = beta[lid];
+  } else if (lid < 2u * OMEGA_BLOCK) {
+    shared[lid] = x[lid - OMEGA_BLOCK];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint row_index = (gid / 32u);
+  if (row_index >= rows) {
+    return;
+  }
+  (void)sg;
+  const device uchar* row = codes + row_index * (OMEGA_BLOCK / 4u);
+  const float a = alpha[row_index];
+
+  const uchar packed = row[lane >> 1];
+  const uint nibble = (lane & 1u) ? (uint(packed) & 0x0Fu) : (uint(packed) >> 4);
+  const uint code_a = (nibble >> 2) & 3u;
+  const uint code_b = nibble & 3u;
+
+  const uint col_a = 2u * lane;
+  const uint col_b = col_a + 1u;
+  const float qa = a * shared[col_a] * omega_codebook(code_a, scale) * shared[OMEGA_BLOCK + col_a];
+  const float qb = a * shared[col_b] * omega_codebook(code_b, scale) * shared[OMEGA_BLOCK + col_b];
+  float partial = qa + qb;
+
+  for (uint offset = 16u; offset > 0u; offset >>= 1u) {
+    partial += simd_shuffle_xor(partial, offset);
+  }
+  if (lane == 0u) {
+    out[row_index] = partial;
+  }
+}
+
+/*
+ * KSC decode throughput probe (DRAM scale).
+ *
+ * streams `rows` block rows once, with the trellis decode interleaved, so the
+ * reported rate is directly comparable to a weight-streaming decode: the code
+ * buffer is far larger than any cache on the part. Weight payload is 18 bytes
+ * per row (16 code bytes + 2 header bytes); alpha/beta/x are activation-side.
+ */
+kernel void ksc_stream_simd(
+    const device ushort* s0 [[buffer(0)]],
+    const device uchar* codes [[buffer(1)]],
+    const device float* alpha [[buffer(2)]],
+    const device float* beta [[buffer(3)]],
+    const device float* x [[buffer(4)]],
+    device float* out [[buffer(5)]],
+    constant float& scale [[buffer(6)]],
+    constant uint& rows [[buffer(7)]],
+    threadgroup float* shared [[threadgroup(0)]],
+    const uint gid [[thread_position_in_grid]],
+    const uint lid [[thread_position_in_threadgroup]],
+    const uint lane [[thread_index_in_simdgroup]]
+) {
+  if (lid < OMEGA_BLOCK) {
+    shared[lid] = beta[lid];
+  } else if (lid < 2u * OMEGA_BLOCK) {
+    shared[lid] = x[lid - OMEGA_BLOCK];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Each SIMD group walks a strip of rows so one staging serves many rows.
+  const uint rows_per_group = 8u;
+  const uint group_id = gid / 32u;
+  const uint row_base = group_id * rows_per_group;
+  float acc[8];
+  for (uint i = 0; i < 8u; ++i) {
+    acc[i] = 0.0f;
+  }
+  const uint col_a = 2u * lane;
+  const uint col_b = col_a + 1u;
+  for (uint i = 0; i < rows_per_group; ++i) {
+    const uint row_index = row_base + i;
+    if (row_index >= rows) {
+      break;
+    }
+    const device uchar* row = codes + row_index * (OMEGA_BLOCK / 4u);
+    const uchar packed = row[lane >> 1];
+    const uint nibble = (lane & 1u) ? (uint(packed) & 0x0Fu) : (uint(packed) >> 4);
+    const float a = alpha[row_index];
+    const float qa = a * shared[col_a] * omega_codebook((nibble >> 2) & 3u, scale) * shared[OMEGA_BLOCK + col_a];
+    const float qb = a * shared[col_b] * omega_codebook(nibble & 3u, scale) * shared[OMEGA_BLOCK + col_b];
+    acc[i] = qa + qb;
+  }
+  // One reduction pass for all eight rows: shuffle cost amortized across the strip.
+  for (uint i = 0; i < rows_per_group; ++i) {
+    float v = acc[i];
+    for (uint offset = 16u; offset > 0u; offset >>= 1u) {
+      v += simd_shuffle_xor(v, offset);
+    }
+    if (lane == 0u && row_base + i < rows) {
+      out[row_base + i] = v;
+    }
+  }
+}
+
+/*
+ * KSC GEMV at uzu shape: one output row spans K = 64 blocks of 64 columns.
+ *
+ * Why this exists: the per-block kernel (ksc_decode_simd) spends five shuffle
+ * steps to reduce two MACs per lane, which dominates at K = 64. uzu's GEMV
+ * path accumulates thousands of columns per output row, so its reduction is
+ * amortized. This kernel matches that shape so the two are comparable:
+ *
+ *   one output row reads K/64 = 64 code blocks (64 x 18 = 1152 bytes)
+ *   each lane accumulates 2 columns per block -> 128 MACs per lane
+ *   one SIMD reduction at the end: 5 shuffles per 128 MACs
+ *
+ * The code stream is the same random-access KSC layout: lane l of a group owns
+ * columns 2l and 2l+1 of each block, nibble l of the block row.
+ */
+kernel void ksc_gemv_k4096(
+    const device uchar* codes [[buffer(0)]],   // rows_of_N x blocks x 16 bytes
+    const device float* alpha [[buffer(1)]],   // N
+    const device float* x [[buffer(2)]],       // K
+    device float* out [[buffer(3)]],           // N
+    constant float& scale [[buffer(4)]],
+    constant uint& n_rows [[buffer(5)]],
+    constant uint& n_blocks [[buffer(6)]],
+    const uint gid [[thread_position_in_grid]],
+    const uint lane [[thread_index_in_simdgroup]]
+) {
+  const uint row_index = gid / 32u;
+  if (row_index >= n_rows) {
+    return;
+  }
+  const device uchar* row = codes + row_index * n_blocks * (OMEGA_BLOCK / 4u);
+  const float a = alpha[row_index];
+  const uint col_a = 2u * lane;
+  const uint col_b = col_a + 1u;
+  float partial = 0.0f;
+  for (uint b = 0; b < n_blocks; ++b) {
+    const device uchar* block = row + b * (OMEGA_BLOCK / 4u);
+    const uchar packed = block[lane >> 1];
+    const uint nibble = (lane & 1u) ? (uint(packed) & 0x0Fu) : (uint(packed) >> 4);
+    const uint base = b * OMEGA_BLOCK;
+    const float qa = x[base + col_a] * omega_codebook((nibble >> 2) & 3u, scale);
+    const float qb = x[base + col_b] * omega_codebook(nibble & 3u, scale);
+    partial += qa + qb;
+  }
+  for (uint offset = 16u; offset > 0u; offset >>= 1u) {
+    partial += simd_shuffle_xor(partial, offset);
+  }
+  if (lane == 0u) {
+    out[row_index] = a * partial;
+  }
+}
+
+/*
  * KSC decode throughput probe.
  *
  * Runs the real trellis decode (not a synthetic stream) over `rows` block rows

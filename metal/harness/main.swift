@@ -149,6 +149,58 @@ func dispatch(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)
     return buffers.last
 }
 
+/// Dispatch with an explicit threadgroup size, for kernels whose lanes must map
+/// onto one row (the SIMD decode family: 32 threads per row).
+func dispatchFixedGroup(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)],
+                        _ constantsU: [(Int, UInt32)], _ width: Int,
+                        threadsPerGroup: Int) -> MTLBuffer? {
+    let state = pipeline(name)
+    guard let commandBuffer = queue.makeCommandBuffer(),
+          let encoder = commandBuffer.makeComputeCommandEncoder() else { return nil }
+    encoder.setComputePipelineState(state)
+    for (i, buffer) in buffers.enumerated() { encoder.setBuffer(buffer, offset: 0, index: i) }
+    for (index, value) in constants {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<Float>.stride, index: index)
+    }
+    for (index, value) in constantsU {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<UInt32>.stride, index: index)
+    }
+    encoder.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: threadsPerGroup, height: 1, depth: 1))
+    encoder.endEncoding()
+    commandBuffer.commit()
+    commandBuffer.waitUntilCompleted()
+    return buffers.last
+}
+
+/// Dispatch with explicit threadgroup size plus threadgroup memory.
+func dispatchSharedFixedGroup(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)],
+                              _ constantsU: [(Int, UInt32)], _ width: Int,
+                              threadsPerGroup: Int, sharedBytes: Int) -> MTLBuffer? {
+    let state = pipeline(name)
+    guard let commandBuffer = queue.makeCommandBuffer(),
+          let encoder = commandBuffer.makeComputeCommandEncoder() else { return nil }
+    encoder.setComputePipelineState(state)
+    for (i, buffer) in buffers.enumerated() { encoder.setBuffer(buffer, offset: 0, index: i) }
+    for (index, value) in constants {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<Float>.stride, index: index)
+    }
+    for (index, value) in constantsU {
+        var v = value
+        encoder.setBytes(&v, length: MemoryLayout<UInt32>.stride, index: index)
+    }
+    encoder.setThreadgroupMemoryLength(sharedBytes, index: 0)
+    encoder.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: threadsPerGroup, height: 1, depth: 1))
+    encoder.endEncoding()
+    commandBuffer.commit()
+    commandBuffer.waitUntilCompleted()
+    return buffers.last
+}
+
 /// Dispatch with a threadgroup-memory pointer at index 8 for the KSC decode
 /// family, which stages beta and x in 2 * OMEGA_BLOCK floats.
 func dispatchShared(_ name: String, _ buffers: [MTLBuffer], _ constants: [(Int, Float)],
@@ -210,6 +262,35 @@ do {
     let tol = manifest.tolerances["ksc_decode_dot"]!
     pass = pass && diff <= tol
     parity["ksc_decode_dot"] = ["max_abs_diff": diff, "tolerance": tol, "pass": diff <= tol]
+}
+
+// ---- ksc_decode_simd (same vectors, lane-parallel decode)
+do {
+    let caseInfo = manifest.cases.ksc_decode_dot
+    let payload = try! Data(contentsOf: vectorDir.appendingPathComponent(caseInfo.file))
+    let r = Reader(payload)
+    let rows = Int(r.u32())
+    let scale = r.f32()
+    let s0 = r.ushortArray(rows)
+    let codes = r.bytes(rows * manifest.block / 4)
+    let alpha = r.floatArray(rows)
+    let beta = r.floatArray(manifest.block)
+    let x = r.floatArray(manifest.block)
+    let expected = r.floatArray(rows)
+
+    let outBuffer = device.makeBuffer(length: rows * 4, options: .storageModeShared)!
+    let buffers = [makeBuffer(device, s0), makeBuffer(device, codes), makeBuffer(device, alpha),
+                   makeBuffer(device, beta), makeBuffer(device, x), outBuffer]
+    _ = dispatchSharedFixedGroup("ksc_decode_simd", buffers, [(6, scale)], [(7, UInt32(rows))],
+                                 rows * 32, threadsPerGroup: 256,
+                                 sharedBytes: 2 * manifest.block * MemoryLayout<Float>.stride)
+    let got = readFloats(outBuffer, rows)
+    let diff = maxAbsDiff(got, expected)
+    // Lane-parallel accumulation changes the summation order, so the tolerance
+    // is wider than the scalar kernel but still tight for float32 over 64 terms.
+    let tol = 2e-4
+    pass = pass && diff <= tol
+    parity["ksc_decode_simd"] = ["max_abs_diff": diff, "tolerance": tol, "pass": diff <= tol]
 }
 
 // ---- awsrc_dot
@@ -347,6 +428,36 @@ do {
     kscThroughput["gb_per_s_median"] = weightBytes / median / 1e9
     kscThroughput["samples"] = samples.count
 
+    // Same weight stream through the lane-parallel kernel, so the two numbers
+    // differ only by decode strategy.
+    let simdState = pipeline("ksc_decode_simd")
+    func simdOnce() -> Double {
+        guard let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return 0 }
+        enc.setComputePipelineState(simdState)
+        for (i, buffer) in buffers.enumerated() { enc.setBuffer(buffer, offset: 0, index: i) }
+        var scale: Float = 1.0
+        var r32 = UInt32(rows)
+        enc.setBytes(&scale, length: 4, index: 6)
+        enc.setBytes(&r32, length: 4, index: 7)
+        enc.setThreadgroupMemoryLength(2 * manifest.block * MemoryLayout<Float>.stride, index: 0)
+        enc.dispatchThreads(MTLSize(width: rows * 32, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        enc.endEncoding()
+        let start = DispatchTime.now().uptimeNanoseconds
+        cb.commit()
+        cb.waitUntilCompleted()
+        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+    }
+    _ = simdOnce(); _ = simdOnce()
+    var simdSamples = [Double]()
+    for _ in 0..<9 { simdSamples.append(simdOnce()) }
+    simdSamples.sort()
+    let simdBytes = Double(rows) * 18.0
+    kscThroughput["simd_gb_per_s_best"] = simdBytes / simdSamples.first! / 1e9
+    kscThroughput["simd_gb_per_s_median"] = simdBytes / simdSamples[simdSamples.count / 2] / 1e9
+    kscThroughput["scalar_gb_per_s_best"] = weightBytes / best / 1e9
+    kscThroughput["speedup_vs_scalar"] = (simdBytes / simdSamples.first!) / (weightBytes / best)
+
 }
 
 do {
@@ -414,11 +525,122 @@ do {
     bandwidth["roofline_tps_ceiling_9b"] = gbs * 1e9 / weightBytes
 }
 
+// ---- ksc_stream_simd (DRAM-scale, single pass): comparable to a real decode
+var streamDecode: [String: Any] = [:]
+do {
+    // 1M block rows = 16 MiB of codes, far beyond L2 on this part, so the pass
+    // is DRAM-bound the way a 5-10 GB checkpoint decode is.
+    let rows = 1 << 20
+    var rng = SystemRandomNumberGenerator()
+    var s0 = [UInt16](repeating: 0, count: rows)
+    for i in 0..<rows { s0[i] = UInt16(truncatingIfNeeded: rng.next() as UInt64) }
+    var codes = [UInt8](repeating: 0, count: rows * manifest.block / 4)
+    for i in 0..<codes.count { codes[i] = UInt8(truncatingIfNeeded: rng.next() as UInt64) }
+    var alpha = [Float](repeating: 1.0, count: rows)
+    for i in 0..<rows { alpha[i] = Float.random(in: 0.5...1.5) }
+    let beta = (0..<manifest.block).map { _ in Float.random(in: -1...1) }
+    let x = (0..<manifest.block).map { _ in Float.random(in: -1...1) }
+
+    let outBuffer = device.makeBuffer(length: rows * 4, options: .storageModeShared)!
+    let buffers = [makeBuffer(device, s0), makeBuffer(device, codes), makeBuffer(device, alpha),
+                   makeBuffer(device, beta), makeBuffer(device, x), outBuffer]
+    let state = pipeline("ksc_stream_simd")
+    // 8 rows per group, so one group covers a strip; 256 threads = 8 groups.
+    let width = (rows / 8) * 32
+
+    func once() -> Double {
+        guard let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return 0 }
+        enc.setComputePipelineState(state)
+        for (i, buffer) in buffers.enumerated() { enc.setBuffer(buffer, offset: 0, index: i) }
+        var scale: Float = 1.0
+        var r32 = UInt32(rows)
+        enc.setBytes(&scale, length: 4, index: 6)
+        enc.setBytes(&r32, length: 4, index: 7)
+        enc.setThreadgroupMemoryLength(2 * manifest.block * MemoryLayout<Float>.stride, index: 0)
+        enc.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        enc.endEncoding()
+        let start = DispatchTime.now().uptimeNanoseconds
+        cb.commit()
+        cb.waitUntilCompleted()
+        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+    }
+    _ = once(); _ = once()
+    var samples = [Double]()
+    for _ in 0..<7 { samples.append(once()) }
+    samples.sort()
+    let bytes = Double(rows) * 18.0
+    streamDecode["rows"] = rows
+    streamDecode["code_bytes"] = rows * manifest.block / 4
+    streamDecode["weight_bytes_per_pass"] = Int(bytes)
+    streamDecode["gb_per_s_best"] = bytes / samples.first! / 1e9
+    streamDecode["gb_per_s_median"] = bytes / samples[samples.count / 2] / 1e9
+    streamDecode["samples"] = samples.count
+}
+
+// ---- ksc_gemv_k4096: uzu-shape GEMV (N=12288, K=4096) for a direct comparison
+var gemv: [String: Any] = [:]
+do {
+    // Qwen3.5-9B shapes: model_dim 4096, hidden_dim 12288. One MLP up-projection
+    // is K=4096 -> N=12288, i.e. 48 MiB of KSC codes at 18 bytes per 64 columns.
+    let nRows = 12288
+    let kCols = 4096
+    let nBlocks = kCols / manifest.block
+    let codeBytes = nRows * nBlocks * (manifest.block / 4)
+    var rng = SystemRandomNumberGenerator()
+    var codes = [UInt8](repeating: 0, count: codeBytes)
+    for i in 0..<codeBytes { codes[i] = UInt8(truncatingIfNeeded: rng.next() as UInt64) }
+    var alpha = [Float](repeating: 1.0, count: nRows)
+    for i in 0..<nRows { alpha[i] = Float.random(in: 0.5...1.5) }
+    let x = (0..<kCols).map { _ in Float.random(in: -1...1) }
+    let outBuffer = device.makeBuffer(length: nRows * 4, options: .storageModeShared)!
+
+    let buffers = [makeBuffer(device, codes), makeBuffer(device, alpha), makeBuffer(device, x), outBuffer]
+    let state = pipeline("ksc_gemv_k4096")
+    let width = nRows * 32
+
+    func once() -> Double {
+        guard let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return 0 }
+        enc.setComputePipelineState(state)
+        for (i, buffer) in buffers.enumerated() { enc.setBuffer(buffer, offset: 0, index: i) }
+        var scale: Float = 1.0
+        var n32 = UInt32(nRows)
+        var b32 = UInt32(nBlocks)
+        enc.setBytes(&scale, length: 4, index: 4)
+        enc.setBytes(&n32, length: 4, index: 5)
+        enc.setBytes(&b32, length: 4, index: 6)
+        enc.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        enc.endEncoding()
+        let start = DispatchTime.now().uptimeNanoseconds
+        cb.commit()
+        cb.waitUntilCompleted()
+        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+    }
+    _ = once(); _ = once()
+    var samples = [Double]()
+    for _ in 0..<7 { samples.append(once()) }
+    samples.sort()
+    // Weight payload for this projection: 64 code bytes... 16 bytes per 64-col
+    // block, plus 2 header bytes per block, times N rows.
+    let weightBytes = Double(nRows) * Double(nBlocks) * 18.0
+    gemv["n_rows"] = nRows
+    gemv["k_cols"] = kCols
+    gemv["n_blocks"] = nBlocks
+    gemv["code_bytes"] = codeBytes
+    gemv["weight_bytes"] = Int(weightBytes)
+    gemv["gb_per_s_best"] = weightBytes / samples.first! / 1e9
+    gemv["gb_per_s_median"] = weightBytes / samples[samples.count / 2] / 1e9
+    gemv["samples"] = samples.count
+}
+
 report["device"] = device.name
 report["parity"] = parity
 report["parity_all_pass"] = pass
 report["bandwidth"] = bandwidth
 report["ksc_throughput"] = kscThroughput
+report["stream_decode"] = streamDecode
+report["gemv_k4096"] = gemv
 report["generated_at_utc"] = ISO8601DateFormatter().string(from: Date())
 
 let outURL = buildDir.appendingPathComponent("report.json")

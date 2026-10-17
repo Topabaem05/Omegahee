@@ -25,31 +25,54 @@ Omega-Uzu has no end-to-end decode path to time.
 | 9B decode, DFlash speculator | 55.1-71.2 tok/s, 5.79 GB | not applicable |
 | 0.8B decode | 175.8-332.4 tok/s, 0.56 GB | not applicable |
 | Weight bytes per token | 5.19 GB at 4.613 bpw (file is 5,189,121,136 B) | 2.678 GB at 2.38075 bpw (computed from paper constants) |
-| Kernel weight throughput | 261-354 GB/s effective during decode | 36.7 GB/s best, 36.2 median (reference kernel) |
+| Kernel weight throughput | 261-354 GB/s effective during decode | 51.6 GB/s best at uzu shape (K=4096 GEMV) |
 | Device streaming peak | - | 376-409 GB/s (probe on this machine) |
 | Parity vs its own reference | n/a | 4/4 kernels within tolerance |
 
-## Why the reference kernel sits about 3x below uzu, and why it is not a verdict
+## The direct experiment: same shape, same weight stream
 
-The reference `ksc_throughput` kernel decodes one 64-column block row per thread
-through a 64-step dependent loop, reaching 36.7 GB/s. uzu's decode path moves
-261-354 GB/s of weights, so the reference sits about 3.0-3.2x below it, not the
-7-10x an earlier probe of mine implied (that probe undercounted the device peak). uzu's `gemm_trellis` does three things the
-reference does not:
+Two kernels were built and measured, both with Metal parity against the numpy
+reference.
 
-1. **SIMD-group cooperation.** The trellis state advances cooperatively across a
-   SIMD group, so 32 lanes share one row instead of one thread walking it. The
-   dependency chain is spread, not serialized.
-2. **Weights derived from a hash, not a table.** `decode_biased_weights` turns a
-   code state into biased weights with integer multiplies and folds, which avoids
-   the 128-entry quantile LUT the paper warns about (bank conflicts).
-3. **Matrix tiling with MMA.** Codes feed a tiled GEMM (`Tile64x64x256`, etc.), so
-   the kernel does many output rows per load and uses the neural accelerator.
+| Kernel | Shape | Weight throughput |
+|---|---|---|
+| scalar, one thread per row | K=64 | 25.8-38.7 GB/s |
+| SIMD group per row, uzu-shaped | N=12288, K=4096 | **51.6 GB/s best, 47.5 median** |
+| uzu decode (measured, speculation off) | same model | 261-354 GB/s |
 
-So the honest statement is: the reference pack proves the bit layout and the
-error bounds, and it deliberately does not attempt production throughput. Any
-future Omega-Uzu speed claim has to be made against `gemm_trellis`, not against
-the reference kernel.
+The uzu-shaped kernel reads the same 14.16 MB of KSC weight bytes per GEMV, with
+one SIMD group owning one output row and each lane owning two columns per 64-column
+block. Parity holds at 1.43e-06, and the spread is tight (49.7, 51.6, 50.8 GB/s
+best over three runs).
+
+**The gap is 5.1-6.9x.** That is the first apples-to-apples number this repository
+can state, and it does not favour Omega-Uzu.
+
+## Why, and what it would take to close it
+
+The bottleneck is arithmetic intensity, not the decode logic. The KSC GEMV
+produces 64 MACs per 16 code bytes, about 2.7 MAC/byte. At batch 1 that is
+bandwidth-bound, and the kernel reaches 13% of the ~380 GB/s float4 peak.
+
+uzu's trellis GEMM is a GEMM, not a GEMV. One code load feeds a full SIMD-group
+MMA tile (64x64x256 and larger), so the same bytes produce hundreds to thousands
+of MACs, and the kernel reaches 69-93% of peak. The advantage is the tiling and
+MMA path, not the quantization format.
+
+Closing the gap therefore needs one of:
+
+1. **A batched KSC GEMM.** Port the format into uzu's tile shapes so the same
+   codes feed MMA fragments. This is the honest port and the only one that
+   produces a comparable number at production batch.
+2. **Fewer bytes per MAC.** The KSC format stores 2 bits per weight. If decode
+   could feed MMA fragments directly instead of scalar LUT lookups, the 48.4%
+   byte reduction would show up as throughput. That is what the paper assumes and
+   what this pack has not built.
+
+The claim that survives measurement is narrower than the paper's table:
+Omega-Uzu's bit layout and error bounds are verified, and its decode is 5.1-6.9x
+behind the shipped engine until a tiled port exists.
+
 
 ## Where Omega-Uzu does have a measured edge
 
