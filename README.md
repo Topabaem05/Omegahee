@@ -21,6 +21,8 @@ The numerical kernels are Python. They are the specification check for a later M
 - `paper/` — LaTeX specification and the compiled 14-page PDF. Source and PDF now agree: the CI/CL table carries all 16 pillar-closure rows. Rebuild with `tectonic` after installing the Noto CJK fonts.
 - `docs/plan_completion.md` — equation-to-function checklist.
 - `docs/design_omega_uzu_integration.md` — paper-to-uzu integration design with the measured pass-cost model and next steps.
+- `docs/problem_report_20261017.md` — open blockers with measurements, and the questions
+  that need a decision before more kernel work.
 - `docs/uzu_metal_kernel_mapping.md` — SIMD-group contract for the uzu crates.
 - `.github/workflows/ci_cl.yml` — unittest on `main` and `feat/omega-uzu-v2`.
 
@@ -46,7 +48,23 @@ verification rows. Rebuild it with `tectonic -X compile paper/uzu_omega_mathemat
 after installing the Noto CJK fonts; the source needs `bm` and `enumitem` in addition
 to the original package list.
 
+## Performance versus uzu
+
+`docs/performance_comparison.md` records what is measured and what is not. The
+short version: Omega-Uzu has no end-to-end decode path, so no tokens/s comparison
+exists. At matched shape (N=12288, K=4096) the KSC GEMV reaches 51.6 GB/s against
+uzu's measured 261-354 GB/s of weight traffic, a 5.1-6.9x gap. The cause is
+arithmetic intensity, not the bit format: the GEMV makes about 2.7 MAC per code
+byte and reaches 13% of the device peak, while uzu's tiled trellis GEMM feeds an
+MMA tile from one load and reaches 69-93%.
+
+```bash
+bash metal/run.sh                 # parity, device streaming, KSC throughput, uzu-shape GEMV
+python metal/tools/roofline.py    # paper accounting on the measured bandwidth
+```
+
 ## Design work
+
 
 `docs/design_omega_uzu_integration.md` turns the paper's Phase A/B spec into a
 measured plan. Two tools back it:
