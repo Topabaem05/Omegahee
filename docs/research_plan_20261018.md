@@ -43,7 +43,7 @@ Omega-Uzu의 2.38bpw/KSC GEMV는 main에서 제거하고 아카이브했다. 다
 - [ ] GPU 유휴·스왑 <1GB·디스크 >20GB 확인. (현재 GPU 96%, 스왑 6.8GB로 차단)
 - [x] 9B 모델 다운로드. 스모크 테스트는 게이트 통과 후.
 - [ ] 9B 10표본 기준선.
-- [x] 27B 모델 다운로드. 10표본 기준선은 게이트 통과 후.
+- [x] 27B 모델 다운로드(현재 외장 아카이브). 10표본 기준선 때 내부로 복원.
 
 게이트: 10표본 중간값·표준편차가 있고, 스왑 <1GB, GPU <10%인가?
 아니면 Phase 1로 가지 않는다.
@@ -111,6 +111,25 @@ Phase 1에서 KV 또는 타일 병목이 확인될 때만 진행한다. 4k 디�
 - [ ] 27B 전체 변환, WikiText-2 PPL + 고정 과제.
 - [ ] Mirai-M 4bit 대비 +2% 게이트.
 - [ ] 최종 보고서: tok/s, 표준편차, 메모리, 품질, 재현 명령.
+
+## Track B: ALoDLM-8B 참조 트랙
+
+사용자가 지정한 `amazon/ALoDLM-8B`는 uzu에 직접 넣을 수 없다. masked
+diffusion + adaptive recurrent core + exit gate를 쓰는 별도 디코더이며,
+공식 최적화 엔진은 CUDA 전용이다. uzu에 Qwen3 백본으로 넣으면 ALoDLM이
+아니라 일반 AR 근사가 된다.
+
+- [x] 모델 카드·config·코드 확인: 16.38GB BF16, 36층, loop 10–26, depth 4.
+- [x] uzu 비호환 판정과 근거 기록: `docs/alodlm_feasibility_20261018.md`.
+- [x] 가중치 설치와 revision 고정(16.4GB, `/Users/topamini/models/alodlm/ALoDLM-8B`).
+- [x] Python 3.12 + PyTorch 2.8 portable 환경 구성(`venv312`).
+- [ ] CPU FP32 스모크 테스트(청정 게이트 통과 후).
+- [ ] MPS/Metal portable 경로를 별도 브랜치에서 실험. PyTorch MPS는
+  available이나 공식 CLI는 cpu/cuda만 허용한다.
+
+ALoDLM을 uzu 안에서 구현하려면 새 디코더가 필요하다. 이는 Phase 0–2의
+uzu 기준선 작업과 분리하며, uzu의 테스트 모델은 계속 Qwen3.5/3.8 Mirai-M을
+쓴다.
 
 ## 저장소 구조
 

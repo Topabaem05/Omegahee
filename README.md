@@ -37,3 +37,7 @@ paper/     historical mathematical specification, not a current measurement
 `paper/` is kept for reference. Its projected tok/s and the old 2.38bpw claims
 are not accepted as current results until the new plan's quality and kernel
 gates pass.
+
+`amazon/ALoDLM-8B` is installed as a separate reference model, not as a uzu
+checkpoint. It is a masked-diffusion/adaptive-recurrence model with its own
+decoder; see `docs/alodlm_feasibility_20261018.md`.

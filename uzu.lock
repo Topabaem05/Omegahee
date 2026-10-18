@@ -21,9 +21,25 @@
     "qwen3.8-27b-m": {
       "repo": "trymirai/Qwen3.8-27B-M",
       "revision": "3d1fe988a0ee35770a5051f3c89912f383adc46e",
-      "path": "/Users/topamini/models/uzu/Qwen3.8-27B-M",
+      "path": "/Volumes/LinuxData/Models/uzu-27b-archive",
+      "status": "archived to external volume",
       "weights_bytes": 14532457872,
       "speculator_bytes": 1032178224
+    }
+  },
+  "reference_models": {
+    "alodlm-8b": {
+      "repo": "amazon/ALoDLM-8B",
+      "revision": "2c4623d93e285bea86a940c2801eac4509862edd",
+      "path": "/Users/topamini/models/alodlm/ALoDLM-8B",
+      "weights_bytes": 16381470720,
+      "venv": "/Users/topamini/models/alodlm/venv312",
+      "python": "3.12.14",
+      "torch": "2.8.0",
+      "transformers": "4.56.1",
+      "alodlm": "0.1.0",
+      "runtime": "portable CPU fp32; optimized path is CUDA-only; no MPS",
+      "uzu_compatible": false
     }
   },
   "clean_gate": "tools/clean_env_check.py"

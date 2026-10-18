@@ -21,9 +21,8 @@
 
 - 9B: `/Users/topamini/models/uzu/Qwen3.5-9B-M` (5.6GB),
   HF revision `55740870dd4bb2a3f28221dfa3e7ab91da95e7b0`
-- 27B: `/Users/topamini/models/uzu/Qwen3.8-27B-M` (15GB, `model.safetensors` 14GB +
-  `speculator/model.safetensors` 984MB), HF revision
-  `3d1fe988a0ee35770a5051f3c89912f383adc46e`
+  27B: `/Volumes/LinuxData/Models/uzu-27b-archive`로 이동(외장). HF revision
+  `3d1fe988a0ee35770a5051f3c89912f383adc46e`. 내부 기준선에는 9B만 둔다.
 
 uzu 포크는 `5baa58b`에서 수정하지 않는다. 소스 변경은 Phase 2 이후에만
 하고, 그때도 새 커밋을 고정한다.
@@ -51,8 +50,10 @@ uzu 기준선과 섞으면 안 된다.
 
 - GPU `Device Utilization` **95%** (다른 YOLO 학습)
 - 스왑 **6.9GB** 사용
-- 내부 디스크 여유 **11GB** (정리 전) → **29GB** (9B/27B uzu 모델 설치 후)
+- 내부 디스크 여유 **11GB** (정리 전) → **17GB** (9B uzu + ALoDLM-8B + venv,
+  27B는 외장 아카이브)
 - 27B GGUF 38GB를 외장 `/Volumes/LinuxData/Models/qwen38-27b-archive`로 이동 완료
+- ALoDLM-8B 16.4GB를 `/Users/topamini/models/alodlm/ALoDLM-8B`에 설치
 - `~/.cache/mirai` 비어 있음
 
 따라서 현재는 **측정 차단** 상태다. 다른 학습을 강제로 종료하지 않는다.
