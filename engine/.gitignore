@@ -1,0 +1,40 @@
+*.pdb
+**/mutants.out*/
+*.DS_Store
+*.proptest-regressions
+.idea/
+
+# Nix
+result
+
+# Metal traces
+*.gputrace
+*.trace
+
+# Rust
+/debug/
+/target/
+**/*.rs.bk
+
+# Python
+*__pycache__
+
+# Node package cache
+.pnpm-store/
+
+# AI tools
+.cursor
+.claude/settings.local.json
+
+# Local-only dev tools
+.env
+.DS_Store
+.claude/settings.local.json
+
+tools/gpu_trace/*.json
+
+# Swift
+.build/
+.swiftpm/
+Package.resolved
+.dinghy.toml
