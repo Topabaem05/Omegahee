@@ -1,0 +1,162 @@
+{
+  "cli": "/Users/topamini/code/jev-search-app/uzu-bench/mirai-aarch64-apple-darwin",
+  "model_dir": "/Users/topamini/models/uzu/Qwen3.5-9B-M",
+  "task": {
+    "identifier": "uzu-baseline",
+    "repo_id": "trymirai/Qwen3.5-9B-M",
+    "number_of_runs": 1,
+    "tokens_limit": 128,
+    "greedy": true,
+    "reasoning_effort": "disabled",
+    "include_replies": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write one short paragraph about the sea."
+      }
+    ]
+  },
+  "runs": 10,
+  "gate": [],
+  "summary": {
+    "n": 10,
+    "speed_samples": 10,
+    "median_tok_s": 80.97407376549674,
+    "mean_tok_s": 82.15310362819568,
+    "stdev_tok_s": 10.64696757315523,
+    "min_tok_s": 67.30482119053677,
+    "max_tok_s": 95.37351274288764,
+    "median_tokens_per_forward": 2.9,
+    "max_memory_gb": 6.216466432,
+    "implied_pass_ms": 35.81393235072356
+  },
+  "samples": [
+    {
+      "returncode": 0,
+      "elapsed_s": 2.4526379108428955,
+      "tok_s": 72.9323627187419,
+      "tokens_per_forward": 2.8,
+      "decode_passes": 35.0,
+      "output_tokens": 96,
+      "memory_gb": 6.216450048,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 1
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.7658708095550537,
+      "tok_s": 71.22092668411409,
+      "tokens_per_forward": 2.5106382978723403,
+      "decode_passes": 47.0,
+      "output_tokens": 116,
+      "memory_gb": 6.216466432,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 2
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.37731671333313,
+      "tok_s": 85.16292135250802,
+      "tokens_per_forward": 3.0,
+      "decode_passes": 35.0,
+      "output_tokens": 103,
+      "memory_gb": 6.216450048,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 3
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.9862780570983887,
+      "tok_s": 67.30482119053677,
+      "tokens_per_forward": 2.5,
+      "decode_passes": 50.0,
+      "output_tokens": 123,
+      "memory_gb": 6.216450048,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 4
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.4022011756896973,
+      "tok_s": 76.78522617848544,
+      "tokens_per_forward": 2.7222222222222223,
+      "decode_passes": 36.0,
+      "output_tokens": 96,
+      "memory_gb": 6.216450048,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 5
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.2264938354492188,
+      "tok_s": 93.2009030163215,
+      "tokens_per_forward": 3.2580645161290325,
+      "decode_passes": 31.0,
+      "output_tokens": 99,
+      "memory_gb": 6.216466432,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 6
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.2010350227355957,
+      "tok_s": 95.37351274288764,
+      "tokens_per_forward": 3.3666666666666667,
+      "decode_passes": 30.0,
+      "output_tokens": 99,
+      "memory_gb": 6.216466432,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 7
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.2443628311157227,
+      "tok_s": 90.2686759357546,
+      "tokens_per_forward": 3.15625,
+      "decode_passes": 32.0,
+      "output_tokens": 99,
+      "memory_gb": 6.216466432,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 8
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.190629243850708,
+      "tok_s": 94.18727736809352,
+      "tokens_per_forward": 3.2580645161290325,
+      "decode_passes": 31.0,
+      "output_tokens": 100,
+      "memory_gb": 6.216466432,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 9
+    },
+    {
+      "returncode": 0,
+      "elapsed_s": 2.7723541259765625,
+      "tok_s": 75.09440909451334,
+      "tokens_per_forward": 2.6382978723404253,
+      "decode_passes": 47.0,
+      "output_tokens": 122,
+      "memory_gb": 6.216466432,
+      "swap_before_mb": 7735.81,
+      "swap_after_mb": 7735.81,
+      "run": 10
+    }
+  ],
+  "environment": {
+    "gpu_utilization_pct": 11,
+    "swap_used_mb": 7735.81,
+    "disk_free_gb": 16.3,
+    "busy_processes": [],
+    "gate_note": "Default gate is false only on residual swap (7.7GB), disk (<20GB), and GPU 11%. No inference/training process was active; result is provisional."
+  }
+}

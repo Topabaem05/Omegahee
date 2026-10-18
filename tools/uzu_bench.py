@@ -128,8 +128,10 @@ def main() -> int:
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     os.makedirs(out_dir, exist_ok=True)
-    task_path = os.path.join(out_dir, "_uzu_task.json")
-    row_path = os.path.join(out_dir, "_uzu_row.json")
+    tmp_dir = os.path.join(root, "bench/tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    task_path = os.path.join(tmp_dir, "_uzu_task.json")
+    row_path = os.path.join(tmp_dir, "_uzu_row.json")
     with open(task_path, "w", encoding="utf-8") as handle:
         json.dump(task_obj, handle, indent=2)
 

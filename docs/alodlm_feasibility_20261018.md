@@ -66,3 +66,22 @@ parallel commitment를 uzu에 새로 구현해야 한다. 이는 모델 교체�
   `cpu`와 `cuda`만 허용한다. MPS 실행은 별도 러너/패치가 필요하다.
 - 실행 게이트: GPU/메모리 청정 조건과 별개로, CPU FP32 33GB가 들어갈 수
   있는지 확인해야 한다.
+
+## 실측 속도 (2026-10-18, 잔여 스왑 7.7GB)
+
+같은 코드 프롬프트, BF16, 16토큰, q=0.5, tau=0.4, window=16. GPU는 11%,
+다른 추론 프로세스는 없었다.
+
+| 장치 | 전체 tok/s | prefill | 생성 구간 tok/s | 평균 exit depth | peak 메모리 |
+|---|---:|---:|---:|---:|---:|
+| CPU | 0.694 | 11.96초 | 1.44 | 1.44 | RSS 15.66GB |
+| MPS | **2.619** | 1.08초 | 3.18 | 1.63 | 17.24GB |
+
+MPS는 전체 3.78배, prefill 11.1배, 생성 구간 2.2배 빨랐다. 같은 출력
+토큰을 냈지만 adaptive exit depth가 달라 완전한 동일 연산은 아니다.
+“Hello” 같은 짧은 프롬프트에서는 exit depth가 커져 0.28–0.78 tok/s로
+떨어졌다. **프롬프트별 편차가 크므로 단일 tok/s로 요약하지 않는다.**
+
+공식 CLI는 `cpu`/`cuda`만 허용한다. MPS 수치는 `tools/alodlm_bench.py`가
+내부 `load_decoder`를 직접 호출해 얻은 비공식 경로다. 원자료는
+`bench/results/alodlm_8b_speed_20261018.json`.
