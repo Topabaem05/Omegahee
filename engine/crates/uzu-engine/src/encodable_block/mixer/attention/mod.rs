@@ -4,12 +4,16 @@ use thiserror::Error;
 use crate::{
     backends::common::{
         Backend, CommandBuffer, CommandBufferEncoding, Kernels,
-        kernel::{AttentionKernel, AttentionKernelConfig, AttentionPrepareInt8Kernel, AttentionPrepareKernel},
+        kernel::{
+            AttentionKernel, AttentionKernelConfig, AttentionPrepareInt8Kernel, AttentionPrepareKernel,
+            ScaleColumnsKernel,
+        },
     },
     config::{rope::AnyRoPEConfig, token_mixer::attention::AttentionConfig},
     data_type::DataType,
     encodable_block::{
         batch_topology::BatchTopology,
+        learned_scale::load_learned_scale,
         linear::{Linear, LinearBlockError, LinearEncodeError},
         mixer::{
             Mixer, MixerEncodeError, MixerState,
@@ -19,6 +23,7 @@ use crate::{
                 rope::PrecalculatedRoPE,
             },
         },
+        normalization::{Normalization, NormalizationNewError, PostLayerScalar, ShortcutMode},
     },
     safetensors::{ParameterLoaderError, ParameterTree},
     utils::maybe_mut::MaybeMut,
@@ -49,6 +54,13 @@ pub struct Attention<B: Backend> {
     sinks: Option<B::GlobalBuffer>,
     kernel: <B::Kernels as Kernels>::AttentionKernel,
     out_projection: Box<dyn Linear<B>>,
+    /// Effective per-channel query scales over (heads head_dim), applied after RoPE.
+    query_scales: Option<B::GlobalBuffer>,
+    /// Effective per-channel gate logit scales and the kernel that applies them in place.
+    gate_scales: Option<(B::GlobalBuffer, <B::Kernels as Kernels>::ScaleColumnsKernel)>,
+    output_norm: Option<Normalization<B>>,
+    /// INT8 KV is used only when the attention kernel supports it and the INT8 prepare path covers the config.
+    use_int8_kv: bool,
 }
 
 #[derive(Debug, Error)]
@@ -63,6 +75,10 @@ pub enum AttentionNewError<B: Backend> {
     Linear(#[from] LinearBlockError<B>),
     #[error("QKVNorm error: {0}")]
     QKVNorm(#[from] QKVNormError<B>),
+    #[error("Normalization error: {0}")]
+    Normalization(#[from] NormalizationNewError<B>),
+    #[error("gate_scale_config requires has_gate")]
+    GateScaleWithoutGate,
 }
 
 #[derive(Debug, Error)]
@@ -135,12 +151,50 @@ impl<B: Backend> Attention<B> {
             context,
         )?;
 
+        let query_scales = config
+            .query_scale_config
+            .as_ref()
+            .map(|scale_config| {
+                load_learned_scale(scale_config, q_dim, &parameter_tree.subtree("query_scale"), context)
+            })
+            .transpose()?;
+        if config.gate_scale_config.is_some() && !config.has_gate {
+            return Err(AttentionNewError::GateScaleWithoutGate);
+        }
+        let gate_scales = config
+            .gate_scale_config
+            .as_ref()
+            .map(|scale_config| -> Result<_, AttentionNewError<B>> {
+                let scales = load_learned_scale(scale_config, q_dim, &parameter_tree.subtree("gate_scale"), context)?;
+                let kernel = <B::Kernels as Kernels>::ScaleColumnsKernel::new(context, data_type)
+                    .map_err(AttentionNewError::Backend)?;
+                Ok((scales, kernel))
+            })
+            .transpose()?;
+        let output_norm = config
+            .output_norm_config
+            .as_ref()
+            .map(|norm_config| {
+                Normalization::new(
+                    q_dim,
+                    data_type,
+                    None,
+                    ShortcutMode::None,
+                    PostLayerScalar::None,
+                    norm_config,
+                    &parameter_tree.subtree("output_norm"),
+                    context,
+                )
+            })
+            .transpose()?;
+
         let prepare = <B::Kernels as Kernels>::AttentionPrepareKernel::new(
             context,
             data_type,
             DataType::F32,
             !is_kv_sharing,
             rope_config.is_some(),
+            query_scales.is_some(),
         )
         .map_err(AttentionNewError::Backend)?;
         let sinks =
@@ -166,8 +220,8 @@ impl<B: Backend> Attention<B> {
             },
         )
         .map_err(AttentionNewError::Kernel)?;
-        let prepare_int8 = kernel
-            .supports_int8()
+        let use_int8_kv = kernel.supports_int8() && query_scales.is_none();
+        let prepare_int8 = use_int8_kv
             .then(|| {
                 <B::Kernels as Kernels>::AttentionPrepareInt8Kernel::new(
                     context,
@@ -212,6 +266,10 @@ impl<B: Backend> Attention<B> {
                 sinks,
                 kernel,
                 out_projection,
+                query_scales,
+                gate_scales,
+                output_norm,
+                use_int8_kv,
             },
             in_projection_input_hadamard_factors,
         ))

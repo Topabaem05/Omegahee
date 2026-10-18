@@ -7,7 +7,7 @@ use crate::{
         Backend, CommandBufferEncoding, CommandBufferExecutable, CommandBufferPending, Context, Kernels,
         kernel::QKVNormKernel,
     },
-    config::normalization::{NormalizationConfig, UpcastMode},
+    config::normalization::{NormReduction, NormalizationConfig, UpcastMode},
     data_type::DataType,
     tests::{
         assert::assert_eq_float,
@@ -30,6 +30,7 @@ fn run_key_value_row_stride_test<B: Backend>() {
         subtract_mean: false,
         has_scale: false,
         has_biases: false,
+        reduction: NormReduction::Mean,
     };
     let key = Head {
         kernel: <B::Kernels as Kernels>::QKVNormKernel::new(

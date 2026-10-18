@@ -73,11 +73,11 @@ mod tests {
                     "logit_soft_cap": null, "logit_scale": null,
                 },
                 "transformer_config": {
-                    "layer_configs": [], "model_dim": 4, "hidden_dim": 4,
+                    "layer_configs": [], "model_dim": 4, "hidden_dim": 4, "recurrence": null,
                     "output_norm_config": {
                         "epsilon": 0.00001, "scale_offset": null,
                         "upcast_mode": "only_normalization", "subtract_mean": false,
-                        "has_scale": true, "has_biases": false,
+                        "has_scale": true, "has_biases": false, "reduction": "mean",
                     },
                 },
                 "vocab_size": 4, "ple_model_config": null, "embedding_norm_config": null,

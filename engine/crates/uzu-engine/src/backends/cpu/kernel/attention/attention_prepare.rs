@@ -41,6 +41,7 @@ pub fn attention_prepare<ElementT: DataTypeRepr + Float, RopeT: DataTypeRepr + F
     #[optional(has_kv)] values: Option<*mut ElementT>,
     #[optional(has_rope)] cosines: Option<*const RopeT>,
     #[optional(has_rope)] sines: Option<*const RopeT>,
+    #[optional(has_query_scales)] query_scales: Option<*const f32>,
     num_q_heads: u32,
     #[optional(has_kv)] num_kv_heads: Option<u32>,
     head_dim: u32,
@@ -50,6 +51,7 @@ pub fn attention_prepare<ElementT: DataTypeRepr + Float, RopeT: DataTypeRepr + F
     batch_dim: u32,
     #[specialize] has_kv: bool,
     #[specialize] has_rope: bool,
+    #[specialize] has_query_scales: bool,
 ) {
     assert!(num_q_heads > 0 || has_kv, "attention prepare without KV requires at least one query head");
     assert!(head_dim > 0, "attention prepare requires nonzero head_dim");
@@ -60,6 +62,7 @@ pub fn attention_prepare<ElementT: DataTypeRepr + Float, RopeT: DataTypeRepr + F
     assert_eq!(cosines.is_some(), has_rope, "attention prepare cosines presence mismatch");
     assert_eq!(sines.is_some(), has_rope, "attention prepare sines presence mismatch");
     assert_eq!(rope_dim.is_some(), has_rope, "attention prepare rope_dim presence mismatch");
+    assert_eq!(query_scales.is_some(), has_query_scales, "attention prepare query_scales presence mismatch");
 
     let (keys, values, num_kv_heads, kv_token_offset) =
         if let (Some(keys), Some(values), Some(num_kv_heads), Some(kv_token_offset)) =
@@ -101,6 +104,11 @@ pub fn attention_prepare<ElementT: DataTypeRepr + Float, RopeT: DataTypeRepr + F
                 let mut element = unsafe { *qkvg_head.add(head_dim_idx) };
                 if has_rope && head_dim_idx < rope_dim && (is_query || is_key) {
                     element = apply_rope(qkvg_head, cosines, sines, batch_idx, head_dim_idx, rope_dim);
+                }
+
+                if is_query && let Some(query_scales) = query_scales {
+                    let scale = unsafe { *query_scales.add(head_idx * head_dim + head_dim_idx) };
+                    element = ElementT::from(element.to_f32().unwrap() * scale).unwrap();
                 }
 
                 if is_query {

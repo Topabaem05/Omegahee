@@ -27,6 +27,7 @@ PUBLIC KERNEL(QKVNorm)(
     constant uint& head_offset,
     constant uint& head_count,
     constant bool& full_layer,
+    constant bool& sum_reduction,
     const uint batch_idx GROUPS(batch_size),
     const uint head_idx GROUPS(head_count),
     const uint lane_id THREADS(METAL_SIMD_SIZE),
@@ -66,7 +67,8 @@ PUBLIC KERNEL(QKVNorm)(
   AccumT total_sum = simd_sum(partial_sum);
 
   // RMS factor.
-  AccumT mean_square = static_cast<AccumT>(total_sum) / static_cast<AccumT>(element_count);
+  AccumT mean_square =
+      sum_reduction ? static_cast<AccumT>(total_sum) : static_cast<AccumT>(total_sum) / static_cast<AccumT>(element_count);
   AccumT rms_norm = rsqrt(mean_square + static_cast<AccumT>(epsilon));
 
   // Normalize + scale.

@@ -4,6 +4,7 @@ pub mod clipping;
 pub mod decoder;
 pub mod dflash;
 pub mod embedding;
+pub mod learned_scale;
 pub mod linear;
 pub mod mlp;
 pub mod model;

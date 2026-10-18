@@ -1,8 +1,9 @@
 use uzu_engine_macros::uzu_config;
 
 use crate::config::{
+    learned_scale::LearnedScaleConfig,
     linear::LinearConfig,
-    normalization::{NormalizationConfig, UpcastMode},
+    normalization::{NormReduction, NormalizationConfig, UpcastMode},
 };
 
 #[uzu_config(super::TokenMixerConfig)]
@@ -26,6 +27,12 @@ pub struct AttentionConfig {
     pub has_gate: bool,
     pub normalize_values: bool,
     pub is_kv_sharing: bool,
+    /// Per-channel query scale over (heads head_dim), applied after RoPE.
+    pub query_scale_config: Option<LearnedScaleConfig>,
+    /// Per-channel scale of the gate logits before the sigmoid.
+    pub gate_scale_config: Option<LearnedScaleConfig>,
+    /// Normalization over (heads head_dim) of the gated output, before the output projection.
+    pub output_norm_config: Option<NormalizationConfig>,
 }
 
 impl AttentionConfig {
@@ -37,6 +44,7 @@ impl AttentionConfig {
             subtract_mean: false,
             has_scale: false,
             has_biases: false,
+            reduction: NormReduction::Mean,
         })
     }
 }

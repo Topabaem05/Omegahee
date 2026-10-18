@@ -28,6 +28,7 @@ fn run<B: Backend>() -> Output {
         DataType::F32,
         true,
         false,
+        false,
     )
     .expect("Failed to create AttentionPrepareKernel");
     let qkvg = [
@@ -46,6 +47,7 @@ fn run<B: Backend>() -> Output {
         &mut queries,
         Some(&mut keys),
         Some(&mut values),
+        None::<&B::GlobalBuffer>,
         None::<&B::GlobalBuffer>,
         None::<&B::GlobalBuffer>,
         2,
@@ -87,6 +89,7 @@ fn run_query_only<B: Backend>() -> Vec<bf16> {
         DataType::F32,
         false,
         false,
+        false,
     )
     .expect("Failed to create AttentionPrepareKernel");
     let qg = [1.0, 2.0, 3.0, 4.0, 101.0, 102.0, 103.0, 104.0, 11.0, 12.0, 13.0, 14.0, 111.0, 112.0, 113.0, 114.0]
@@ -100,6 +103,7 @@ fn run_query_only<B: Backend>() -> Vec<bf16> {
         &mut queries,
         None::<&mut B::GlobalBuffer>,
         None::<&mut B::GlobalBuffer>,
+        None::<&B::GlobalBuffer>,
         None::<&B::GlobalBuffer>,
         None::<&B::GlobalBuffer>,
         2,

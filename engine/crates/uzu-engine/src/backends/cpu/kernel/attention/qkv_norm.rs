@@ -26,6 +26,7 @@ pub fn qkv_norm<
     head_offset: u32,
     head_count: u32,
     full_layer: bool,
+    sum_reduction: bool,
     #[specialize] in_place: bool,
     #[specialize] has_scales: bool,
 ) {
@@ -51,7 +52,11 @@ pub fn qkv_norm<
                 let input_val = unsafe { AccumT::from(*qkvg_input.add(offset + i)).unwrap() };
                 total_sum = total_sum + input_val * input_val;
             }
-            let mean_square: AccumT = total_sum / head_dim_accum;
+            let mean_square: AccumT = if sum_reduction {
+                total_sum
+            } else {
+                total_sum / head_dim_accum
+            };
             let rms_norm = AccumT::from((mean_square + epsilon).to_f32().unwrap().sqrt().recip()).unwrap();
 
             for i in 0..head_dim {
