@@ -77,7 +77,7 @@ GPU가 유휴가 되고 스왑이 1GB 미만으로 내려간 뒤 Phase 0을 시�
 측정 전 반드시 실행한다.
 
 ```bash
-python tools/clean_env_check.py
+python3 tools/clean_env_check.py
 ```
 
 통과 조건:
@@ -94,7 +94,7 @@ python tools/clean_env_check.py
 
 ## 기준선 실행 순서
 
-1. `python tools/clean_env_check.py` 통과.
+1. `python3 tools/clean_env_check.py` 통과.
 2. 9B 모델 다운로드 및 스모크 테스트(성능 아님).
 3. 같은 task JSON으로 10표본 측정. 원자료는 `bench/results/`에 JSON.
 4. 27B 모델 다운로드 및 스모크 테스트.
