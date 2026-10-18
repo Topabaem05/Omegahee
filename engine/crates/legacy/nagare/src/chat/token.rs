@@ -1,0 +1,535 @@
+use std::{
+    pin::Pin,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use futures::{Stream, StreamExt, stream};
+use hanashi::{
+    Encoding as EncodingTrait,
+    chat::{Encoding, EncodingConfig, TokenizerLocation, hanashi::HanashiEncodingImpl, harmony::HarmonyEncodingImpl},
+};
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use keisoku::KeisokuError;
+use shoji::{
+    traits::{
+        State,
+        backend::{
+            Error,
+            chat_message::{Output, ToolCallState},
+            chat_token::{
+                Backend, Instance as ChatTokenBackendInstance, StreamInput, StreamOutput, TokenStreamMetrics,
+            },
+        },
+    },
+    types::{
+        basic::{SamplingParameters, Token, TokenId},
+        model::Model,
+        session::chat::{
+            ChatConfig, ChatContentBlock, ChatMessage, ChatReplyConfig, ChatReplyEnergy, ChatReplyFinishReason,
+            ChatReplySpeculatorStats, ChatReplyStats,
+        },
+    },
+};
+use tokio_util::sync::CancellationToken;
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use crate::util::power::{EnergyRecorder, Error as EnergyError};
+use crate::{chat::ChatSessionError, util::helpers::error_stream};
+
+pub struct Session {
+    instance: Arc<dyn ChatTokenBackendInstance>,
+    state: Box<dyn State>,
+    encoding: Encoding,
+    input_tokens: Vec<u64>,
+    stop_token_ids: Box<[u64]>,
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    energy_recorder: EnergyRecorder,
+}
+
+impl Session {
+    pub async fn create_instance(
+        backend: &dyn Backend,
+        config: ChatConfig,
+        reference: String,
+    ) -> Result<Arc<dyn ChatTokenBackendInstance>, ChatSessionError> {
+        let instance = backend.instance(reference, config).await.map_err(|error| ChatSessionError::Backend {
+            message: error.to_string(),
+        })?;
+        Ok(Arc::from(instance))
+    }
+
+    pub async fn with_instance(
+        instance: Arc<dyn ChatTokenBackendInstance>,
+        reference: String,
+        model: &Model,
+    ) -> Result<Self, ChatSessionError> {
+        let encoding_config: Option<EncodingConfig> = model
+            .encoding
+            .as_ref()
+            .map(|value| serde_json::from_str::<EncodingConfig>(value.json.as_str()))
+            .transpose()
+            .map_err(|error| ChatSessionError::Loading {
+                message: format!("Failed to parse encoding config: {error}"),
+            })?;
+
+        let tokenizer_location = TokenizerLocation::Directory {
+            path: reference,
+            name: None,
+        };
+
+        let encoding = match encoding_config {
+            Some(EncodingConfig::Hanashi {
+                config,
+            }) => HanashiEncodingImpl::new(config, instance.tokenizer()).map(Encoding::Hanashi).map_err(|err| {
+                ChatSessionError::Loading {
+                    message: format!("can not create harmony encoding: {err}"),
+                }
+            }),
+            Some(EncodingConfig::Harmony {
+                config,
+            }) => HarmonyEncodingImpl::new(config, tokenizer_location).map(Encoding::Harmony).map_err(|err| {
+                ChatSessionError::Loading {
+                    message: format!("can not create harmony encoding: {err}"),
+                }
+            }),
+            None => Err(ChatSessionError::Loading {
+                message: "can not get encoding config".to_string(),
+            }),
+        }?;
+        let state = instance.state().await.map_err(|error| ChatSessionError::Backend {
+            message: error.to_string(),
+        })?;
+        let stop_token_ids = instance.stop_token_ids().ok_or_else(|| ChatSessionError::Loading {
+            message: "stop_token_ids is None".to_string(),
+        })?;
+
+        Ok(Self {
+            instance,
+            state,
+            encoding,
+            input_tokens: Vec::new(),
+            stop_token_ids,
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            energy_recorder: EnergyRecorder::new(),
+        })
+    }
+
+    pub async fn reset(&mut self) -> Result<(), ChatSessionError> {
+        self.encoding.reset().map_err(|error| ChatSessionError::Backend {
+            message: error.to_string(),
+        })?;
+        self.state_reset().await?;
+        Ok(())
+    }
+
+    pub async fn stream<'a>(
+        &'a mut self,
+        input: &'a [ChatMessage],
+        config: ChatReplyConfig,
+        cancel_token: CancellationToken,
+    ) -> Pin<Box<dyn Stream<Item = Result<Output, ChatSessionError>> + Send + 'a>> {
+        let time_start = Instant::now();
+
+        let cached_tokens_input = match self.prepare_input(input).await {
+            Ok(cached_tokens) => cached_tokens,
+            Err(error) => return error_stream(error),
+        };
+
+        let instance = self.instance.as_ref();
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            if let Err(error) = self.energy_recorder.begin() {
+                return error_stream(error.into());
+            }
+        }
+        let time_prefill_start = Instant::now();
+        let stream = instance.stream(&self.input_tokens, self.state.as_mut(), config.clone(), cancel_token.clone());
+        let output_tokens_start = self.encoding.state().tokens.len();
+
+        let stream_state = StreamingState {
+            config: config.clone(),
+            cancel_token,
+            encoding: &mut self.encoding,
+            output_tokens_start,
+            max_context_length: self.instance.max_context_length(),
+            stop_token_ids: self.stop_token_ids.clone(),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            energy_recorder: &mut self.energy_recorder,
+
+            time_start,
+            time_last_token: None,
+            time_prefill_start,
+            time_first_token: None,
+            input_energy: None,
+            total_tokens_input: self.input_tokens.len(),
+            cached_tokens_input,
+            total_tokens_output: 0,
+            memory_usage: None,
+            metrics: None,
+        };
+
+        stream::unfold(
+            (stream, stream_state, false, false),
+            move |(mut inner, mut state, terminated, tail_done)| async move {
+                if tail_done {
+                    return None;
+                }
+
+                match inner.next().await {
+                    Some(event) => {
+                        state.metrics = inner.metrics();
+                        state.memory_usage = instance.peak_memory_usage();
+                        let output = Self::build_output(event, &mut state);
+                        let terminated = terminated || matches!(&output, Ok(out) if out.finish_reason.is_some());
+                        Some((output, (inner, state, terminated, false)))
+                    },
+                    None => {
+                        if !terminated && state.cancel_token.is_cancelled() {
+                            let output = Self::render_output(&mut state, Some(ChatReplyFinishReason::Cancelled));
+                            Some((output, (inner, state, true, true)))
+                        } else {
+                            None
+                        }
+                    },
+                }
+            },
+        )
+        .boxed()
+    }
+
+    pub fn peak_memory_usage(&self) -> Option<usize> {
+        self.instance.peak_memory_usage()
+    }
+
+    async fn state_reset(&mut self) -> Result<(), ChatSessionError> {
+        self.state = self.instance.state().await.map_err(|error| ChatSessionError::Backend {
+            message: error.to_string(),
+        })?;
+        Ok(())
+    }
+
+    async fn prepare_input(
+        &mut self,
+        messages: &[ChatMessage],
+    ) -> Result<usize, ChatSessionError> {
+        let cached = self.encoding.state().tokens.clone();
+        if let Some(suffix) = self.encoding.try_append(messages).map_err(|error| ChatSessionError::Backend {
+            message: error.to_string(),
+        })? {
+            self.input_tokens = suffix.into_iter().map(u64::from).collect();
+            return Ok(cached.len());
+        }
+
+        let rendered_ids = self.build_input(messages)?;
+        let cached_ids: Vec<_> = cached.iter().map(|token| u64::from(token.id)).collect();
+        // Without an append operation preserving the sampled encoding, the newly
+        // built encoding can describe the live backend only if token IDs match.
+        if rendered_ids.starts_with(&cached_ids) {
+            self.input_tokens = rendered_ids[cached_ids.len()..].to_vec();
+            return Ok(cached_ids.len());
+        }
+
+        self.state_reset().await?;
+        let cached_text: String = cached.iter().map(|token| token.value.as_str()).collect();
+        let rendered_text = self.encoding.state().text();
+        tracing::warn!(
+            "Reprefill: {}",
+            describe_reprefill(&cached, &self.encoding.state().tokens, &cached_text, &rendered_text)
+        );
+        self.input_tokens = rendered_ids;
+        Ok(0)
+    }
+
+    fn build_input(
+        &mut self,
+        all_messages: &[ChatMessage],
+    ) -> Result<StreamInput, ChatSessionError> {
+        self.encoding.reset().map_err(|err| ChatSessionError::Backend {
+            message: err.to_string(),
+        })?;
+        self.encoding.encode(all_messages.to_vec()).map_err(|err| ChatSessionError::Backend {
+            message: err.to_string(),
+        })?;
+        let all_tokens = self.encoding.state().tokens.iter().map(|token| token.id as u64).collect::<Vec<u64>>();
+        Ok(all_tokens)
+    }
+
+    fn build_output(
+        event: Result<StreamOutput, Error>,
+        state: &mut StreamingState<'_>,
+    ) -> Result<Output, ChatSessionError> {
+        let now = Instant::now();
+        let result = event.map_err(|err| ChatSessionError::Backend {
+            message: err.to_string(),
+        })?;
+
+        match result {
+            StreamOutput::LimitReached => Self::render_output(state, Some(ChatReplyFinishReason::Length)),
+            StreamOutput::Token(token) => {
+                if state.total_tokens_output == 0 {
+                    state.time_first_token = Some(now);
+                    #[cfg(any(target_os = "macos", target_os = "ios"))]
+                    {
+                        match state.energy_recorder.split() {
+                            Ok(energy) => state.input_energy = Some(energy),
+                            Err(EnergyError::Keisoku(KeisokuError::PowerReadingUnavailable)) => {},
+                            Err(error) => return Err(error.into()),
+                        }
+                    }
+                }
+                state.total_tokens_output += 1;
+                state.time_last_token = Some(now);
+
+                if let Err(err) = state.encoding.decode(vec![token as TokenId]) {
+                    return Err(ChatSessionError::Backend {
+                        message: err.to_string(),
+                    });
+                }
+
+                let finish_reason = state.get_finish_reason(token);
+                Self::render_output(state, finish_reason)
+            },
+        }
+    }
+
+    fn render_output(
+        state: &mut StreamingState<'_>,
+        finish_reason: Option<ChatReplyFinishReason>,
+    ) -> Result<Output, ChatSessionError> {
+        let have_finish_reason = finish_reason.is_some();
+        let stats = state.get_stats(have_finish_reason)?;
+        let Some(message) = state.encoding.state().messages.last() else {
+            return Ok(Output {
+                finish_reason,
+                stats,
+                ..Default::default()
+            });
+        };
+
+        let tool_calls = message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ChatContentBlock::ToolCall {
+                    value,
+                } => Some(ToolCallState::Finished(value.clone())),
+                ChatContentBlock::ToolCallCandidate {
+                    value,
+                    ..
+                } => Some(ToolCallState::Candidate(
+                    // the block stores the candidate text as a JSON string document
+                    serde_json::from_str::<String>(&value.json).unwrap_or_else(|_| value.json.clone()),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let finish_reason = if let Some(ChatReplyFinishReason::Stop) = finish_reason
+            && !tool_calls.is_empty()
+        {
+            Some(ChatReplyFinishReason::ToolCalls)
+        } else {
+            finish_reason
+        };
+
+        Ok(Output {
+            reasoning: message.reasoning(),
+            text: message.text(),
+            tool_calls,
+            finish_reason,
+            stats,
+        })
+    }
+
+    pub fn supports_tool_calls(&self) -> bool {
+        self.encoding.supports_tool_calls()
+    }
+
+    pub fn supports_multiple_tool_calls(&self) -> bool {
+        self.encoding.supports_multiple_tool_calls()
+    }
+
+    pub fn sampling_defaults(&self) -> SamplingParameters {
+        self.instance.sampling_defaults()
+    }
+}
+
+fn describe_reprefill(
+    cached: &[Token],
+    rendered: &[Token],
+    cached_text: &str,
+    rendered_text: &str,
+) -> String {
+    let text_difference = cached_text.bytes().zip(rendered_text.bytes()).take_while(|(a, b)| a == b).count();
+    let token_difference = cached.iter().zip(rendered).take_while(|(a, b)| a.id == b.id).count();
+    let reason = if rendered_text.starts_with(cached_text) {
+        "rendered token IDs changed"
+    } else if cached_text.starts_with(rendered_text) {
+        "rendered prompt is shorter than cached text"
+    } else {
+        "rendered text changed"
+    };
+    let token_difference_description = if token_difference == cached.len() && token_difference == rendered.len() {
+        "none (token IDs match)".to_string()
+    } else {
+        let describe = |token: Option<&Token>| {
+            token.map_or_else(|| "<end>".to_string(), |token| format!("{} ({:?})", token.id, token.value))
+        };
+        format!(
+            "{token_difference} (0-based), cached={}, rendered={}",
+            describe(cached.get(token_difference)),
+            describe(rendered.get(token_difference)),
+        )
+    };
+    let context = |label: &str, tokens: &[Token]| {
+        let start = token_difference.saturating_sub(3);
+        let end = (token_difference + 4).min(tokens.len());
+        let window: Vec<_> = tokens[start..end].iter().map(|token| (token.id, token.value.as_str())).collect();
+        format!("{label}[{start}..{end}]={window:?}")
+    };
+    format!(
+        "{reason}; discarding {} cached tokens, prefilling {} tokens; \
+         first_text_difference_byte={text_difference} (0-based), cached_bytes={}, rendered_bytes={}; \
+         first_token_difference={token_difference_description}; {}; {}",
+        cached.len(),
+        rendered.len(),
+        cached_text.len(),
+        rendered_text.len(),
+        context("cached_tokens", cached),
+        context("rendered_tokens", rendered),
+    )
+}
+
+struct StreamingState<'a> {
+    config: ChatReplyConfig,
+    cancel_token: CancellationToken,
+    encoding: &'a mut Encoding,
+    output_tokens_start: usize,
+    max_context_length: Option<usize>,
+    stop_token_ids: Box<[u64]>,
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    energy_recorder: &'a mut EnergyRecorder,
+
+    time_start: Instant,
+    time_last_token: Option<Instant>,
+    time_prefill_start: Instant,
+    time_first_token: Option<Instant>,
+    input_energy: Option<ChatReplyEnergy>,
+    total_tokens_input: usize,
+    cached_tokens_input: usize,
+    total_tokens_output: usize,
+    memory_usage: Option<usize>,
+    metrics: Option<TokenStreamMetrics>,
+}
+
+impl Drop for StreamingState<'_> {
+    fn drop(&mut self) {
+        // Emit once per generated message, including streams stopped early.
+        tracing::debug!(
+            "Decoded tokens: {:?}",
+            self.encoding.state().tokens[self.output_tokens_start..].iter().map(|token| token.id).collect::<Vec<_>>()
+        );
+    }
+}
+
+impl StreamingState<'_> {
+    fn get_finish_reason(
+        &self,
+        token: u64,
+    ) -> Option<ChatReplyFinishReason> {
+        let tokens_count = self.encoding.state().tokens.len();
+        if self.cancel_token.is_cancelled() {
+            Some(ChatReplyFinishReason::Cancelled)
+        } else if self.stop_token_ids.contains(&token) {
+            Some(ChatReplyFinishReason::Stop)
+        } else if let Some(token_limit) = self.config.token_limit
+            && self.total_tokens_output >= token_limit as usize
+        {
+            Some(ChatReplyFinishReason::Length)
+        } else if let Some(length) = self.max_context_length
+            && tokens_count >= length
+        {
+            Some(ChatReplyFinishReason::ContextLimitReached)
+        } else {
+            None
+        }
+    }
+
+    fn get_stats(
+        &mut self,
+        last_stat: bool,
+    ) -> Result<ChatReplyStats, ChatSessionError> {
+        let speculator_stats = if let Some(metrics) = self.metrics.as_ref() {
+            let num_forward_passes = metrics.num_prefill_forward_passes + metrics.num_decode_forward_passes;
+            (num_forward_passes > 0).then(|| ChatReplySpeculatorStats {
+                tokens_per_forward_pass: metrics.num_tokens_accepted as f64 / num_forward_passes as f64,
+                num_decode_forward_passes: num_forward_passes as u32,
+            })
+        } else {
+            None
+        };
+
+        let total_duration = self.time_last_token.unwrap_or(Instant::now()).duration_since(self.time_start);
+        let ttft_duration =
+            self.time_first_token.map(|time_first_token| time_first_token.duration_since(self.time_prefill_start));
+        let prefill_tps = ttft_duration.and_then(|duration| {
+            (self.total_tokens_input > 0 && !duration.is_zero())
+                .then(|| self.total_tokens_input as f64 / duration.as_secs_f64())
+        });
+
+        let generate_duration = if let (Some(start), Some(finish)) = (self.time_first_token, self.time_last_token) {
+            Some(finish.duration_since(start))
+        } else {
+            None
+        };
+        let generate_tps = calculate_rate(self.total_tokens_output, generate_duration);
+
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        let completed_energy = if last_stat {
+            match self.energy_recorder.finish() {
+                Ok(energy) => Some(energy),
+                Err(EnergyError::Keisoku(KeisokuError::PowerReadingUnavailable)) => None,
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            None
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        let completed_energy = None;
+        let (input_energy, output_energy) = if self.time_first_token.is_some() {
+            (self.input_energy.clone(), completed_energy)
+        } else {
+            (completed_energy, None)
+        };
+        Ok(ChatReplyStats {
+            duration: total_duration.as_secs_f64(),
+            time_to_first_token: ttft_duration.map(|time| time.as_secs_f64()),
+            prefill_tokens_per_second: prefill_tps,
+            generate_tokens_per_second: generate_tps,
+            tokens_count_input: Some(self.total_tokens_input as u32),
+            tokens_count_input_cached: Some(self.cached_tokens_input as u32),
+            tokens_count_output: Some(self.total_tokens_output as u32),
+            memory_used_bytes: last_stat.then(|| self.memory_usage.map(|bytes| bytes as i64)).flatten(),
+            speculator_stats,
+            input_energy,
+            output_energy,
+        })
+    }
+}
+
+fn calculate_rate(
+    tokens: usize,
+    duration: Option<Duration>,
+) -> Option<f64> {
+    if tokens < 2 {
+        return None;
+    }
+
+    let duration = duration?;
+    if duration.is_zero() {
+        return None;
+    }
+
+    Some((tokens - 1) as f64 / duration.as_secs_f64())
+}

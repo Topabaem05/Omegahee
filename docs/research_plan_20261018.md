@@ -121,8 +121,15 @@ ALoDLM은 uzu 비호환·저속으로 판정해 삭제했다. 현재 4B 참조 �
 - [x] Dory 지원 llama.cpp 포크(`brianchmielNV/llama.cpp`, revision
   `98a74c97…`) 빌드. SHA 검증 완료.
 - [x] 1/2/4 loops 기준선(128토큰, 3표본): 20.0 / 8.9 / 10.3 tok/s.
-- [ ] `--override-kv "dory.num_loops=int:N,dory.recurrent_kv_cache_mode=str:per_loop"`
-  로 loop 수를 바꾼다.
+  2 loops 값은 재현되지 않음(새 측정 14.7). 인용하지 않는다.
+- [x] `--override-kv "dory.num_loops=int:N"`로 loop 수를 바꾼다
+  (`tools/dory_bench.py`).
+- [x] BF16 스케일 텐서의 CPU 배치를 고쳐 그래프 분할 8,085 → 14.
+  디코드 1/2/4 loops = **61.7 / 42.2 / 25.1 tok/s**(수정 전 19.3 / 14.7 / 8.95),
+  greedy 파리티 9/9. 잠정값(스왑·디스크 게이트 실패, GPU 유휴 시작).
+  `docs/dory_speed_20261018.md`, `patches/dory-llama-cpy-placement.patch`.
+- [ ] 청정 게이트 통과 후 10표본 재측정.
+- [ ] L2 norm 단일 커널화(남은 간격: 4 loops 커널 상한 약 36.5 tok/s의 69%).
 - [x] GGUF 매니페스트: 46 fields, 507 tensors.
 - [x] Omega-Uzu `DoryModel` adapter와 1/2/4-loop parity. 4토큰 생성이
   llama.cpp와 일치한다(`Hello! How can`).

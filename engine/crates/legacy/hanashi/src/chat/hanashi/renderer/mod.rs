@@ -1,0 +1,438 @@
+mod config;
+mod error;
+mod functions;
+
+pub use config::{JinjaFunction, RendererConfig};
+pub use error::Error;
+pub use functions::{raise_exception, strftime_now, to_json};
+use indexmap::IndexMap;
+use minijinja::Environment;
+use minijinja_contrib::pycompat::unknown_method_callback;
+use shoji::types::{
+    basic::{ReasoningEffort, Token},
+    session::chat::ChatMessage,
+};
+
+use crate::chat::hanashi::messages::rendered::{FieldConfig, Message as RenderedMessage};
+
+pub static TEMPLATE_NAME: &str = "chat_template";
+pub static STRFTIME_NOW_FUNCTION_NAME: &str = "strftime_now";
+pub static RAISE_EXCEPTION_FUNCTION_NAME: &str = "raise_exception";
+pub static TOJSON_FILTER_NAME: &str = "tojson";
+
+pub struct Renderer {
+    config: RendererConfig,
+}
+
+impl Renderer {
+    pub fn new(config: RendererConfig) -> Self {
+        Self {
+            config,
+        }
+    }
+
+    pub fn render(
+        &self,
+        messages: &[ChatMessage],
+        should_add_preamble: bool,
+        bos_token: Option<Token>,
+        eos_token: Option<Token>,
+        additional_context: Option<&IndexMap<String, serde_json::Value>>,
+    ) -> Result<String, Error> {
+        let mut environment = Environment::new();
+        environment.set_unknown_method_callback(unknown_method_callback);
+        for function in &self.config.jinja.required_functions {
+            environment.add_function(
+                function.to_string(),
+                match function {
+                    JinjaFunction::StrftimeNow => strftime_now,
+                },
+            );
+        }
+        environment.add_function(RAISE_EXCEPTION_FUNCTION_NAME, raise_exception);
+        environment.add_filter(TOJSON_FILTER_NAME, to_json);
+        environment
+            .add_template(TEMPLATE_NAME, self.config.jinja.template.as_str())
+            .map_err(|_| Error::InvalidTemplate)?;
+
+        let mut jinja_context = IndexMap::<String, minijinja::Value>::new();
+        let mut jinja_messages = Vec::new();
+        for message in messages {
+            let rendered = RenderedMessage::from_message(message, &self.config.canonization, &self.config.rendering)?;
+            for (key, value) in &rendered.context {
+                insert_into_context(&mut jinja_context, key.clone(), minijinja::Value::from_serialize(value))?;
+            }
+            if !rendered.message.is_empty() {
+                jinja_messages.push(minijinja::Value::from_serialize(&rendered.message));
+            }
+        }
+        insert_into_context(&mut jinja_context, "messages".to_string(), minijinja::Value::from(jinja_messages))?;
+
+        // Context fields driven by an optional control block (e.g. `reasoning_effort`)
+        // fall back to the model's declared default when no message carries the block:
+        // absence must behave exactly like `ReasoningEffort::Default`, never like a
+        // hidden extra state. A `"default"` mapping of `null` means the model's default
+        // is to not pass anything, so nothing is injected in that case.
+        let default_key = ReasoningEffort::Default.to_string();
+        for role_config in self.config.rendering.values() {
+            for (field_name, field) in &role_config.context {
+                if jinja_context.contains_key(field_name) {
+                    continue;
+                }
+                let FieldConfig::Unique {
+                    mapping: Some(mapping),
+                    ..
+                } = &field.config
+                else {
+                    continue;
+                };
+                if let Some(Some(default_value)) = mapping.get(&default_key) {
+                    insert_into_context(
+                        &mut jinja_context,
+                        field_name.clone(),
+                        minijinja::Value::from_serialize(default_value),
+                    )?;
+                }
+            }
+        }
+        insert_into_context(
+            &mut jinja_context,
+            self.config.jinja.preamble_control_key.clone(),
+            minijinja::Value::from(should_add_preamble),
+        )?;
+        if let Some(bos_token_key) = &self.config.jinja.bos_token_key {
+            let bos_token = bos_token.ok_or(Error::BosTokenRequired)?;
+            insert_into_context(
+                &mut jinja_context,
+                bos_token_key.clone(),
+                minijinja::Value::from(bos_token.value.clone()),
+            )?;
+        }
+        if let Some(eos_token_key) = &self.config.jinja.eos_token_key {
+            let eos_token = eos_token.ok_or(Error::EosTokenRequired)?;
+            insert_into_context(
+                &mut jinja_context,
+                eos_token_key.clone(),
+                minijinja::Value::from(eos_token.value.clone()),
+            )?;
+        }
+        if let Some(additional_context) = additional_context {
+            for (key, value) in additional_context {
+                insert_into_context(&mut jinja_context, key.clone(), minijinja::Value::from_serialize(value))?;
+            }
+        }
+
+        let template = environment.get_template(TEMPLATE_NAME).map_err(|_| Error::InvalidTemplate)?;
+        let result = template
+            .render(minijinja::Value::from_serialize(&jinja_context))
+            .map_err(|error| Error::RenderFailed {
+                reason: error.to_string(),
+            })?
+            .trim_start()
+            .to_string();
+        Ok(result)
+    }
+}
+
+fn insert_into_context(
+    context: &mut IndexMap<String, minijinja::Value>,
+    key: String,
+    value: minijinja::Value,
+) -> Result<(), Error> {
+    if context.contains_key(&key) {
+        return Err(Error::DuplicateContextKey {
+            key,
+        });
+    }
+    context.insert(key, value);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use shoji::types::{
+        basic::{ToolCall, Value},
+        session::chat::ChatContentBlock,
+    };
+
+    use super::*;
+    use crate::chat::hanashi::config::HanashiConfig;
+
+    fn renderer(config: HanashiConfig) -> Renderer {
+        Renderer::new(config.resolve().unwrap().rendering)
+    }
+
+    fn render(
+        renderer: &Renderer,
+        messages: Vec<ChatMessage>,
+    ) -> String {
+        renderer.render(&messages, true, None, None, None).unwrap()
+    }
+
+    fn user_message() -> ChatMessage {
+        ChatMessage::user().with_text("Hi".to_string())
+    }
+
+    fn system_message_with_effort(effort: ReasoningEffort) -> ChatMessage {
+        ChatMessage::system().with_reasoning_effort(effort)
+    }
+
+    fn tool_result_messages(value: serde_json::Value) -> Vec<ChatMessage> {
+        vec![
+            user_message(),
+            ChatMessage::assistant().with_tool_call(ToolCall {
+                identifier: Some("call_1".to_string()),
+                name: "echo".to_string(),
+                arguments: Value::from(serde_json::json!({})),
+            }),
+            ChatMessage::tool().with_block(ChatContentBlock::ToolCallResult {
+                identifier: Some("call_1".to_string()),
+                name: Some("echo".to_string()),
+                value: Value::from(value),
+            }),
+        ]
+    }
+
+    #[test]
+    fn qwen_tool_result_fields_render_json_as_text() {
+        for config in [
+            HanashiConfig::Qwen3,
+            HanashiConfig::Qwen3Instruct,
+            HanashiConfig::Qwen3Thinking,
+            HanashiConfig::Qwen35,
+            HanashiConfig::Qwen36,
+            HanashiConfig::Qwen38,
+        ] {
+            let renderer = renderer(config);
+            for result in [
+                serde_json::json!({"datasets": [{"label": "Revenue", "data": [12.5, 15]}]}),
+                serde_json::json!([1, "two", null]),
+                serde_json::json!(42),
+                serde_json::json!(true),
+                serde_json::json!(null),
+                serde_json::json!("ready"),
+            ] {
+                let prompt = render(&renderer, tool_result_messages(result.clone()));
+                let response =
+                    prompt.split_once("<tool_response>\n").unwrap().1.split_once("\n</tool_response>").unwrap().0;
+                let expected = result.as_str().map(str::to_owned).unwrap_or_else(|| result.to_string());
+                assert_eq!(response, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn gpt_oss_template_serializes_tool_results_once() {
+        // Its template calls tojson itself, so the adapter must keep JSON values.
+        let renderer = renderer(HanashiConfig::GptOss);
+        for result in [
+            serde_json::json!({"datasets": [{"label": "Revenue", "data": [12.5, 15]}]}),
+            serde_json::json!([1, "two", null]),
+            serde_json::json!(42),
+            serde_json::json!(true),
+            serde_json::json!(null),
+            serde_json::json!("ready"),
+        ] {
+            let prompt = render(&renderer, tool_result_messages(result.clone()));
+            let response = prompt
+                .split_once("<|start|>functions.echo to=assistant<|channel|>commentary<|message|>")
+                .unwrap()
+                .1
+                .split_once("<|end|>")
+                .unwrap()
+                .0;
+            assert_eq!(serde_json::from_str::<serde_json::Value>(response).unwrap(), result);
+        }
+    }
+
+    #[test]
+    fn absent_reasoning_effort_renders_like_default() {
+        let renderer = renderer(HanashiConfig::Qwen35);
+
+        let without_block = render(&renderer, vec![user_message()]);
+        let with_default_block =
+            render(&renderer, vec![system_message_with_effort(ReasoningEffort::Default), user_message()]);
+
+        assert_eq!(without_block, with_default_block);
+        assert!(
+            without_block.ends_with("<|im_start|>assistant\n<think>\n"),
+            "expected a thinking-enabled generation prompt, got: {without_block:?}"
+        );
+    }
+
+    #[test]
+    fn disabled_reasoning_effort_still_disables_thinking() {
+        let renderer = renderer(HanashiConfig::Qwen35);
+
+        let prompt = render(&renderer, vec![system_message_with_effort(ReasoningEffort::Disabled), user_message()]);
+
+        assert!(
+            prompt.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+            "expected a thinking-disabled generation prompt, got: {prompt:?}"
+        );
+    }
+
+    #[test]
+    fn absent_reasoning_effort_stays_unset_when_default_is_not_mapped() {
+        // gpt-oss maps `"default"` to `null`: its default is to pass nothing, so
+        // absence and an explicit default block must both leave the variable unset.
+        let renderer = renderer(HanashiConfig::GptOss);
+
+        let without_block = render(&renderer, vec![user_message()]);
+        let with_default_block =
+            render(&renderer, vec![system_message_with_effort(ReasoningEffort::Default), user_message()]);
+
+        assert_eq!(without_block, with_default_block);
+        let declared_effort = HanashiConfig::GptOss.default_reasoning_effort().unwrap().unwrap();
+        assert_eq!(declared_effort, ReasoningEffort::Medium);
+        let with_declared_effort = render(&renderer, vec![system_message_with_effort(declared_effort), user_message()]);
+        assert_eq!(without_block, with_declared_effort);
+    }
+
+    #[test]
+    fn muse_glimmer_levels_and_default_match_rendered_instructions() {
+        let capabilities = HanashiConfig::MuseGlimmer.capabilities().unwrap();
+        assert!(!capabilities.supports_disable_reasoning);
+        assert!(!capabilities.reasoning_efforts.contains(&ReasoningEffort::Disabled));
+
+        let renderer = renderer(HanashiConfig::MuseGlimmer);
+        let render_effort = |effort: Option<ReasoningEffort>| {
+            let mut messages = Vec::new();
+            if let Some(effort) = effort {
+                messages.push(system_message_with_effort(effort));
+            }
+            messages.push(user_message());
+            renderer.render(
+                &messages,
+                true,
+                Some(Token {
+                    id: 0,
+                    value: "<|begin_of_text|>".to_string(),
+                    is_special: true,
+                }),
+                None,
+                None,
+            )
+        };
+        let high = render_effort(Some(ReasoningEffort::High)).unwrap();
+        assert_eq!(render_effort(None).unwrap(), high);
+        assert_eq!(render_effort(Some(ReasoningEffort::Default)).unwrap(), high);
+
+        for effort in [ReasoningEffort::Low, ReasoningEffort::Medium, ReasoningEffort::High, ReasoningEffort::XHigh] {
+            assert!(capabilities.reasoning_efforts.contains(&effort));
+            assert!(render_effort(Some(effort)).unwrap().contains(&format!("Reasoning strength: {effort}.")));
+        }
+        assert!(matches!(render_effort(Some(ReasoningEffort::Disabled)),
+            Err(Error::Message(crate::chat::hanashi::messages::Error::UnmappedValue { value, .. })) if value == "disabled"));
+    }
+
+    #[test]
+    fn qwen38_preserves_historical_thinking_by_default() {
+        let renderer = renderer(HanashiConfig::Qwen38);
+
+        let history = vec![
+            user_message(),
+            ChatMessage::assistant().with_reasoning("deep thought".to_string()).with_text("the answer".to_string()),
+            user_message(),
+        ];
+        let prompt = render(&renderer, history);
+
+        assert!(prompt.contains("<think>\ndeep thought\n</think>"), "historical thinking dropped: {prompt:?}");
+    }
+
+    #[test]
+    fn qwen38_every_supported_effort_renders() {
+        let renderer = renderer(HanashiConfig::Qwen38);
+
+        for effort in [
+            ReasoningEffort::Disabled,
+            ReasoningEffort::Default,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::XHigh,
+        ] {
+            render(&renderer, vec![system_message_with_effort(effort), user_message()]);
+        }
+    }
+
+    #[test]
+    fn qwen38_reasoning_effort_injects_instructions() {
+        let renderer = renderer(HanashiConfig::Qwen38);
+
+        let low = render(&renderer, vec![system_message_with_effort(ReasoningEffort::Low), user_message()]);
+        let medium = render(&renderer, vec![system_message_with_effort(ReasoningEffort::Medium), user_message()]);
+        let xhigh = render(&renderer, vec![system_message_with_effort(ReasoningEffort::XHigh), user_message()]);
+        let default = render(&renderer, vec![system_message_with_effort(ReasoningEffort::Default), user_message()]);
+
+        assert!(low.contains("Reasoning effort is set to low."), "got: {low:?}");
+        assert!(!medium.contains("Reasoning effort is set to"), "got: {medium:?}");
+        assert!(xhigh.contains("Reasoning effort is set to xhigh."), "got: {xhigh:?}");
+        assert_eq!(default, xhigh);
+    }
+
+    #[test]
+    fn qwen38_disabled_still_disables_thinking() {
+        let renderer = renderer(HanashiConfig::Qwen38);
+
+        let prompt = render(&renderer, vec![system_message_with_effort(ReasoningEffort::Disabled), user_message()]);
+
+        assert!(
+            prompt.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+            "expected a thinking-disabled generation prompt, got: {prompt:?}"
+        );
+    }
+
+    #[test]
+    fn qwen38_tool_call_json_preserves_cached_text() {
+        let renderer = renderer(HanashiConfig::Qwen38);
+        let history = vec![system_message_with_effort(ReasoningEffort::Disabled), user_message()];
+        let prompt = render(&renderer, history.clone());
+
+        // Generated parameter text, including the nested edit shape from the reprefill log.
+        for items in [
+            r#"["<"]"#,
+            r##"[{"oldText": "#include <stddef.h>", "newText": "<>&'\"\\\n\t\r\u0001", "literal": "\\u003c"}]"##,
+            r#"{"nested": ["<>&'"]}"#,
+        ] {
+            let generated = format!(
+                "<tool_call>\n<function=echo>\n<parameter=items>\n{items}\n</parameter>\n</function>\n</tool_call><|im_end|>"
+            );
+            let cached_text = format!("{prompt}{generated}");
+            // Rebuild the assistant message from the structured arguments echoed by the client.
+            let mut continuation = history.clone();
+            continuation.push(ChatMessage::assistant().with_tool_call(ToolCall {
+                identifier: Some("call_1".to_string()),
+                name: "echo".to_string(),
+                arguments: Value::from(serde_json::json!({
+                    "items": serde_json::from_str::<serde_json::Value>(items).unwrap()
+                })),
+            }));
+            continuation.push(ChatMessage::tool().with_block(ChatContentBlock::ToolCallResult {
+                identifier: Some("call_1".to_string()),
+                name: Some("echo".to_string()),
+                value: Value::from(serde_json::json!("ok")),
+            }));
+
+            let rendered = render(&renderer, continuation);
+            assert!(rendered.starts_with(&cached_text), "cached prefix changed for {items}: {rendered}");
+        }
+    }
+
+    #[test]
+    fn qwen38_capabilities_report_levels() {
+        let capabilities = HanashiConfig::Qwen38.capabilities().unwrap();
+
+        assert!(capabilities.supports_reasoning);
+        assert!(capabilities.supports_disable_reasoning);
+        for effort in [
+            ReasoningEffort::Disabled,
+            ReasoningEffort::Default,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::XHigh,
+        ] {
+            assert!(capabilities.reasoning_efforts.contains(&effort), "missing {effort}");
+        }
+        assert!(!capabilities.reasoning_efforts.contains(&ReasoningEffort::High));
+    }
+}

@@ -1,0 +1,103 @@
+name: setup
+description: Setup dependencies
+
+inputs:
+  linters:
+    description: "Install linters"
+    required: false
+    default: 'false'
+  metal:
+    description: "Install metal toolchain"
+    required: false
+    default: 'false'
+  test_data:
+    description: "Download test data"
+    required: false
+    default: 'false'
+  nextest:
+    description: "Install nextest"
+    required: false
+    default: 'false'
+  target:
+    description: "Additional Rust target to install"
+    required: false
+    default: ''
+  bindings:
+    description: "Install bindings requirements"
+    required: false
+    default: 'false'
+  node-version:
+    description: "Node.js version for bindings and apps"
+    required: false
+    default: '20'
+
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev build-essential pkg-config cmake
+      shell: bash
+
+    # - if: runner.os == 'Linux'
+    #   run: |
+    #     sudo mkdir -p /data/cargo
+    #     sudo chown runner:runner /data/cargo
+
+    #     mkdir -p ~/.cargo
+    #     rm -rf ~/.cargo/registry && ln -sfn /data/cargo/registry ~/.cargo/registry
+    #     rm -rf ~/.cargo/git && ln -sfn /data/cargo/git ~/.cargo/git
+    #   shell: bash
+
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.target }}
+
+    - uses: dtolnay/rust-toolchain@nightly
+      with:
+        targets: ${{ inputs.target }}
+        components: ${{ inputs.linters == 'true' && 'rustfmt,clippy' || '' }}
+
+    # TODO: drop wasi when pure wasm is done and switch to latest
+    - if: inputs.target == 'wasm32-wasip1-threads'
+      uses: bytecodealliance/actions/wasmtime/setup@v1
+      with:
+        version: "46.0.0"
+
+    - if: inputs.linters == 'true'
+      run: |
+        arch -arm64 brew install clang-format cargo-deny
+      shell: bash
+
+    - if: inputs.metal == 'true'
+      run: |
+        arch -arm64 brew install cmake
+        xcodebuild -downloadComponent MetalToolchain
+      shell: bash
+
+    - if: inputs.nextest == 'true'
+      uses: taiki-e/install-action@nextest
+
+    - if: inputs.test_data == 'true' || inputs.bindings == 'true'
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - if: inputs.test_data == 'true'
+      run: |
+        cd ./tools/
+        uv run export configs
+        uv run export tokenizers
+      shell: bash
+
+    - if: inputs.bindings == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: "https://registry.npmjs.org"
+
+    - if: inputs.bindings == 'true'
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.33.0

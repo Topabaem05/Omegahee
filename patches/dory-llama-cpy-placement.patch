@@ -1,0 +1,38 @@
+diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
+index 175e5fa..a4010ad 100644
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -771,12 +771,12 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
+ // example: https://github.com/ggml-org/llama.cpp/pull/17548
+ //
+ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
+-    {LLM_TENSOR_RESIDUAL_ALPHA,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+-    {LLM_TENSOR_ATTN_QK_SCALE,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+-    {LLM_TENSOR_ATTN_GATE_SCALE,            {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+-    {LLM_TENSOR_FFN_GATE_SCALE,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+-    {LLM_TENSOR_FFN_UP_SCALE,               {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+-    {LLM_TENSOR_OUTPUT_SCALE,              {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_MUL}},
++    {LLM_TENSOR_RESIDUAL_ALPHA,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_CPY}},
++    {LLM_TENSOR_ATTN_QK_SCALE,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_CPY}},
++    {LLM_TENSOR_ATTN_GATE_SCALE,            {LLM_TENSOR_LAYER_REPEATING, GGML_OP_CPY}},
++    {LLM_TENSOR_FFN_GATE_SCALE,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_CPY}},
++    {LLM_TENSOR_FFN_UP_SCALE,               {LLM_TENSOR_LAYER_REPEATING, GGML_OP_CPY}},
++    {LLM_TENSOR_OUTPUT_SCALE,              {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_CPY}},
+     {LLM_TENSOR_TOKEN_EMBD,                 {LLM_TENSOR_LAYER_INPUT,     GGML_OP_GET_ROWS}},
+     {LLM_TENSOR_POS_EMBD,                   {LLM_TENSOR_LAYER_INPUT,     GGML_OP_GET_ROWS}},
+     {LLM_TENSOR_TOKEN_TYPES,                {LLM_TENSOR_LAYER_INPUT,     GGML_OP_GET_ROWS}},
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 6f9412a..416814f 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1050,6 +1050,10 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
+             {
+                 op_tensor = ggml_scale(ctx, w, 1.0f);
+             } break;
++        case GGML_OP_CPY:
++            {
++                op_tensor = ggml_cast(ctx, w, GGML_TYPE_F32);
++            } break;
+         default:
+             GGML_ABORT("%s: missing test for op %s for tensor %s", __func__, ggml_op_name(op), w->name);
+     }

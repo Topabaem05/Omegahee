@@ -1,0 +1,633 @@
+use std::collections::HashMap;
+
+use openai_harmony::chat::{
+    Author as ExternalAuthor, Content as ExternalContent, DeveloperContent as ExternalDeveloperContent,
+    Message as ExternalMessage, Role as ExternalRole, SystemContent as ExternalSystemContent,
+};
+use shoji::types::{
+    basic::{ReasoningEffort, ToolCall, ToolNamespace, Value},
+    session::chat::{ChatContentBlock, ChatMessage, ChatMessageMetadata, ChatRole},
+};
+
+use crate::chat::{
+    harmony::{
+        CHANNEL_ANALYSIS, CHANNEL_COMMENTARY, CHANNEL_FINAL, CONTENT_TYPE_JSON, ROLE_ASSISTANT,
+        bridging::{Error, FromHarmony, ToHarmony},
+    },
+    strftime_now,
+};
+
+const FUNCTIONS_NAMESPACE: &str = "functions";
+const RECIPIENT_ASSISTANT: &str = ROLE_ASSISTANT;
+const BUILTIN_BROWSER: &str = "browser";
+const BUILTIN_PYTHON: &str = "python";
+
+pub fn bridge_messages_to_harmony(
+    messages: &[ChatMessage],
+    is_initial: bool,
+) -> Result<Vec<ExternalMessage>, Error> {
+    let mut result = Vec::new();
+    // Plain system text becomes developer `# Instructions`, matching the reference gpt-oss chat template.
+    // The harmony system message always carries the meta preamble (identity, reasoning effort, valid channels) the model was trained to expect.
+    let mut pending_instructions: Vec<String> = Vec::new();
+
+    // Unset reasoning still uses the native system defaults. Only add this at
+    // the beginning: incremental encodes must not repeat the system preamble.
+    if is_initial && !messages.iter().any(|message| message.role == ChatRole::System {}) {
+        result.push(system_message(ExternalSystemContent::default()));
+    }
+
+    for message in messages {
+        if !pending_instructions.is_empty() && !matches!(message.role, ChatRole::System {} | ChatRole::Developer {}) {
+            result.push(developer_message(std::mem::take(&mut pending_instructions).join("")));
+        }
+
+        match &message.role {
+            ChatRole::System {} => {
+                let mut system_content = ExternalSystemContent::default();
+
+                for block in &message.content {
+                    match block {
+                        ChatContentBlock::Identity {
+                            value,
+                        } => {
+                            system_content.model_identity = Some(value.clone());
+                        },
+                        ChatContentBlock::ReasoningEffort {
+                            value,
+                        } => {
+                            system_content.reasoning_effort = Some((*value).to_harmony()?);
+                        },
+                        ChatContentBlock::ConversationStartDate {
+                            value,
+                        } => {
+                            system_content.conversation_start_date = Some(value.clone());
+                        },
+                        ChatContentBlock::KnowledgeCutoff {
+                            value,
+                        } => {
+                            system_content.knowledge_cutoff = Some(value.clone());
+                        },
+                        ChatContentBlock::BuiltinTools {
+                            names,
+                        } => {
+                            for name in names {
+                                match name.as_str() {
+                                    BUILTIN_BROWSER => {
+                                        system_content = system_content.with_browser_tool();
+                                    },
+                                    BUILTIN_PYTHON => {
+                                        system_content = system_content.with_python_tool();
+                                    },
+                                    _ => {
+                                        return Err(Error::UnsupportedBuiltinTool {
+                                            name: name.clone(),
+                                        });
+                                    },
+                                }
+                            }
+                        },
+                        ChatContentBlock::Text {
+                            value,
+                        } => {
+                            pending_instructions.push(value.clone());
+                        },
+                        other => {
+                            return Err(Error::UnsupportedContentBlock {
+                                block_type: other.get_type(),
+                                role: message.role.clone(),
+                            });
+                        },
+                    }
+                }
+
+                result.push(system_message(system_content));
+            },
+            ChatRole::Developer {} => {
+                let mut developer_content = ExternalDeveloperContent::default();
+                let mut text_parts: Vec<String> = std::mem::take(&mut pending_instructions);
+
+                for block in &message.content {
+                    match block {
+                        ChatContentBlock::Text {
+                            value,
+                        } => {
+                            text_parts.push(value.clone());
+                        },
+                        ChatContentBlock::Tools {
+                            namespaces,
+                        } => {
+                            for namespace in namespaces {
+                                developer_content = developer_content.with_tools(namespace.clone().to_harmony()?);
+                            }
+                        },
+                        other => {
+                            return Err(Error::UnsupportedContentBlock {
+                                block_type: other.get_type(),
+                                role: message.role.clone(),
+                            });
+                        },
+                    }
+                }
+
+                if !text_parts.is_empty() {
+                    developer_content.instructions = Some(text_parts.join(""));
+                }
+
+                result.push(ExternalMessage {
+                    author: ExternalAuthor::from(ExternalRole::Developer),
+                    recipient: None,
+                    content: vec![ExternalContent::DeveloperContent(developer_content)],
+                    channel: None,
+                    content_type: None,
+                });
+            },
+            ChatRole::User {} => {
+                let mut text_parts: Vec<String> = Vec::new();
+
+                for block in &message.content {
+                    match block {
+                        ChatContentBlock::Text {
+                            value,
+                        } => {
+                            text_parts.push(value.clone());
+                        },
+                        other => {
+                            return Err(Error::UnsupportedContentBlock {
+                                block_type: other.get_type(),
+                                role: message.role.clone(),
+                            });
+                        },
+                    }
+                }
+
+                if text_parts.is_empty() {
+                    return Err(Error::ContentRequired {
+                        role: message.role.clone(),
+                    });
+                }
+
+                result.push(ExternalMessage::from_role_and_content(ExternalRole::User, text_parts.join("")));
+            },
+            ChatRole::Assistant {} => {
+                let mut reasoning_parts: Vec<String> = Vec::new();
+                let mut text_parts: Vec<String> = Vec::new();
+                let mut tool_calls: Vec<ToolCall> = Vec::new();
+
+                for block in &message.content {
+                    match block {
+                        ChatContentBlock::Reasoning {
+                            value,
+                        } => {
+                            reasoning_parts.push(value.clone());
+                        },
+                        ChatContentBlock::Text {
+                            value,
+                        } => {
+                            text_parts.push(value.clone());
+                        },
+                        ChatContentBlock::ToolCall {
+                            value,
+                        } => {
+                            tool_calls.push(value.clone());
+                        },
+                        other => {
+                            return Err(Error::UnsupportedContentBlock {
+                                block_type: other.get_type(),
+                                role: message.role.clone(),
+                            });
+                        },
+                    }
+                }
+
+                if tool_calls.len() > 1 {
+                    return Err(Error::MultipleToolCalls);
+                }
+
+                if !reasoning_parts.is_empty() {
+                    result.push(
+                        ExternalMessage::from_role_and_content(ExternalRole::Assistant, reasoning_parts.join(""))
+                            .with_channel(CHANNEL_ANALYSIS),
+                    );
+                }
+
+                if !text_parts.is_empty() {
+                    // text next to a tool call is a commentary-channel preamble, not a final reply
+                    let channel = if tool_calls.is_empty() {
+                        CHANNEL_FINAL
+                    } else {
+                        CHANNEL_COMMENTARY
+                    };
+                    result.push(
+                        ExternalMessage::from_role_and_content(ExternalRole::Assistant, text_parts.join(""))
+                            .with_channel(channel),
+                    );
+                }
+
+                if let Some(tool_call) = tool_calls.first() {
+                    let arguments = serde_json::Value::try_from(tool_call.arguments.clone()).map_err(|error| {
+                        Error::SerializationFailed {
+                            message: error.to_string(),
+                        }
+                    })?;
+
+                    result.push(
+                        ExternalMessage::from_role_and_content(
+                            ExternalRole::Assistant,
+                            serde_json::to_string(&arguments).map_err(|error| Error::SerializationFailed {
+                                message: error.to_string(),
+                            })?,
+                        )
+                        .with_channel(CHANNEL_COMMENTARY)
+                        .with_recipient(format!("{FUNCTIONS_NAMESPACE}.{}", tool_call.name))
+                        .with_content_type(CONTENT_TYPE_JSON),
+                    );
+                }
+            },
+            ChatRole::Tool {} => {
+                if message.content.len() != 1 {
+                    return Err(Error::MultipleContentBlocks);
+                }
+
+                let block = &message.content[0];
+                let ChatContentBlock::ToolCallResult {
+                    identifier: _,
+                    name,
+                    value,
+                } = block
+                else {
+                    return Err(Error::UnsupportedContentBlock {
+                        block_type: block.get_type(),
+                        role: message.role.clone(),
+                    });
+                };
+
+                let name = name.as_ref().ok_or(Error::MissingToolCallResultName)?;
+
+                let result_value =
+                    serde_json::Value::try_from(value.clone()).map_err(|error| Error::SerializationFailed {
+                        message: error.to_string(),
+                    })?;
+
+                result.push(
+                    ExternalMessage::from_author_and_content(
+                        ExternalAuthor::new(ExternalRole::Tool, format!("{FUNCTIONS_NAMESPACE}.{name}")),
+                        serde_json::to_string(&result_value).map_err(|error| Error::SerializationFailed {
+                            message: error.to_string(),
+                        })?,
+                    )
+                    .with_channel(CHANNEL_COMMENTARY)
+                    .with_recipient(RECIPIENT_ASSISTANT),
+                );
+            },
+            ChatRole::Custom {
+                ..
+            } => {
+                return Err(Error::UnsupportedRole {
+                    role: message.role.clone(),
+                });
+            },
+        }
+    }
+
+    if !pending_instructions.is_empty() {
+        result.push(developer_message(pending_instructions.join("")));
+    }
+
+    Ok(result)
+}
+
+fn system_message(mut content: ExternalSystemContent) -> ExternalMessage {
+    // Match the reference template's current-date fallback.
+    if content.conversation_start_date.is_none() {
+        content.conversation_start_date = Some(strftime_now("%Y-%m-%d".to_string()));
+    }
+    ExternalMessage {
+        author: ExternalAuthor::from(ExternalRole::System),
+        recipient: None,
+        content: vec![ExternalContent::SystemContent(content)],
+        channel: None,
+        content_type: None,
+    }
+}
+
+fn developer_message(instructions: String) -> ExternalMessage {
+    let developer_content = ExternalDeveloperContent {
+        instructions: Some(instructions),
+        ..Default::default()
+    };
+    ExternalMessage {
+        author: ExternalAuthor::from(ExternalRole::Developer),
+        recipient: None,
+        content: vec![ExternalContent::DeveloperContent(developer_content)],
+        channel: None,
+        content_type: None,
+    }
+}
+
+pub fn bridge_messages_from_harmony(messages: &[ExternalMessage]) -> Result<Vec<ChatMessage>, Error> {
+    let mut result = Vec::new();
+    let mut index = 0;
+
+    while index < messages.len() {
+        let message = &messages[index];
+
+        match &message.author.role {
+            ExternalRole::System => {
+                let mut content = Vec::new();
+
+                for external_content in &message.content {
+                    match external_content {
+                        ExternalContent::SystemContent(system_content) => {
+                            if let Some(identity) = &system_content.model_identity {
+                                content.push(ChatContentBlock::Identity {
+                                    value: identity.clone(),
+                                });
+                            }
+                            if let Some(effort) = &system_content.reasoning_effort {
+                                content.push(ChatContentBlock::ReasoningEffort {
+                                    value: ReasoningEffort::from_harmony(*effort),
+                                });
+                            }
+                            if let Some(date) = &system_content.conversation_start_date {
+                                content.push(ChatContentBlock::ConversationStartDate {
+                                    value: date.clone(),
+                                });
+                            }
+                            if let Some(cutoff) = &system_content.knowledge_cutoff {
+                                content.push(ChatContentBlock::KnowledgeCutoff {
+                                    value: cutoff.clone(),
+                                });
+                            }
+                            if let Some(tools) = &system_content.tools {
+                                let names: Vec<String> = tools.keys().cloned().collect();
+                                if !names.is_empty() {
+                                    content.push(ChatContentBlock::BuiltinTools {
+                                        names,
+                                    });
+                                }
+                            }
+                        },
+                        ExternalContent::Text(text_content) => {
+                            content.push(ChatContentBlock::Text {
+                                value: text_content.text.clone(),
+                            });
+                        },
+                        _ => {
+                            return Err(Error::SerializationFailed {
+                                message: "Unexpected content type in system message".to_string(),
+                            });
+                        },
+                    }
+                }
+
+                result.push(ChatMessage {
+                    role: ChatRole::System {},
+                    content,
+                    metadata: ChatMessageMetadata {
+                        values: HashMap::new(),
+                    },
+                });
+                index += 1;
+            },
+            ExternalRole::Developer => {
+                let mut content = Vec::new();
+
+                for external_content in &message.content {
+                    match external_content {
+                        ExternalContent::DeveloperContent(developer_content) => {
+                            if let Some(instructions) = &developer_content.instructions {
+                                content.push(ChatContentBlock::Text {
+                                    value: instructions.clone(),
+                                });
+                            }
+                            if let Some(tools) = &developer_content.tools {
+                                let namespaces: Vec<ToolNamespace> =
+                                    tools.values().cloned().map(ToolNamespace::from_harmony).collect();
+                                if !namespaces.is_empty() {
+                                    content.push(ChatContentBlock::Tools {
+                                        namespaces,
+                                    });
+                                }
+                            }
+                        },
+                        ExternalContent::Text(text_content) => {
+                            content.push(ChatContentBlock::Text {
+                                value: text_content.text.clone(),
+                            });
+                        },
+                        _ => {
+                            return Err(Error::SerializationFailed {
+                                message: "Unexpected content type in developer message".to_string(),
+                            });
+                        },
+                    }
+                }
+
+                result.push(ChatMessage {
+                    role: ChatRole::Developer {},
+                    content,
+                    metadata: ChatMessageMetadata {
+                        values: HashMap::new(),
+                    },
+                });
+                index += 1;
+            },
+            ExternalRole::User => {
+                let text = extract_text_content(&message.content);
+
+                result.push(ChatMessage {
+                    role: ChatRole::User {},
+                    content: vec![ChatContentBlock::Text {
+                        value: text,
+                    }],
+                    metadata: ChatMessageMetadata {
+                        values: HashMap::new(),
+                    },
+                });
+                index += 1;
+            },
+            ExternalRole::Assistant => {
+                let mut content = Vec::new();
+
+                while index < messages.len() && messages[index].author.role == ExternalRole::Assistant {
+                    let assistant_message = &messages[index];
+                    let text = extract_text_content(&assistant_message.content);
+
+                    match assistant_message.channel.as_deref() {
+                        Some(CHANNEL_ANALYSIS) => {
+                            content.push(ChatContentBlock::Reasoning {
+                                value: text,
+                            });
+                        },
+                        Some(CHANNEL_COMMENTARY) => {
+                            match assistant_message.recipient.as_deref() {
+                                Some(recipient) => {
+                                    let name = strip_namespace_prefix(recipient);
+
+                                    match serde_json::from_str::<serde_json::Value>(&text) {
+                                        Ok(json_value) => {
+                                            content.push(ChatContentBlock::ToolCall {
+                                                value: ToolCall {
+                                                    identifier: None,
+                                                    name: name.to_string(),
+                                                    arguments: Value::from(json_value),
+                                                },
+                                            });
+                                        },
+                                        Err(_) => {
+                                            content.push(ChatContentBlock::ToolCallCandidate {
+                                                value: Value::from(serde_json::Value::String(format!(
+                                                    "{{\"name\":{},\"arguments\":{text}",
+                                                    serde_json::to_string(name).expect("tool name serializes")
+                                                ))),
+                                                identifier: None,
+                                            });
+                                        },
+                                    }
+                                },
+                                // commentary without a recipient is a user-visible preamble
+                                // (e.g. an action plan announced before calling tools)
+                                None => {
+                                    content.push(ChatContentBlock::Text {
+                                        value: text,
+                                    });
+                                },
+                            }
+                        },
+                        _ => {
+                            content.push(ChatContentBlock::Text {
+                                value: text,
+                            });
+                        },
+                    }
+
+                    index += 1;
+                }
+
+                result.push(ChatMessage {
+                    role: ChatRole::Assistant {},
+                    content,
+                    metadata: ChatMessageMetadata {
+                        values: HashMap::new(),
+                    },
+                });
+            },
+            ExternalRole::Tool => {
+                let text = extract_text_content(&message.content);
+                let qualified_name = message.author.name.as_deref().ok_or(Error::MissingToolCallResultName)?;
+                let name = strip_namespace_prefix(qualified_name);
+
+                let value = Value::from(serde_json::from_str::<serde_json::Value>(&text).map_err(|error| {
+                    Error::SerializationFailed {
+                        message: error.to_string(),
+                    }
+                })?);
+
+                result.push(ChatMessage {
+                    role: ChatRole::Tool {},
+                    content: vec![ChatContentBlock::ToolCallResult {
+                        identifier: None,
+                        name: Some(name.to_string()),
+                        value,
+                    }],
+                    metadata: ChatMessageMetadata {
+                        values: HashMap::new(),
+                    },
+                });
+                index += 1;
+            },
+        }
+    }
+
+    Ok(result)
+}
+
+fn extract_text_content(content: &[ExternalContent]) -> String {
+    content
+        .iter()
+        .filter_map(|external_content| match external_content {
+            ExternalContent::Text(text_content) => Some(text_content.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn strip_namespace_prefix(qualified_name: &str) -> &str {
+    qualified_name.strip_prefix(FUNCTIONS_NAMESPACE).and_then(|rest| rest.strip_prefix('.')).unwrap_or(qualified_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absent_system_instructions_use_the_same_native_defaults_as_medium() {
+        let user = ChatMessage::user().with_text("Hello".to_string());
+        let implicit = bridge_messages_to_harmony(std::slice::from_ref(&user), true).unwrap();
+        let explicit = bridge_messages_to_harmony(
+            &[ChatMessage::system().with_reasoning_effort(ReasoningEffort::Medium), user],
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(implicit, explicit);
+        assert_eq!(implicit[0].author.role, ExternalRole::System);
+        let ExternalContent::SystemContent(content) = &implicit[0].content[0] else {
+            panic!("expected a native system preamble");
+        };
+        assert_eq!(content.reasoning_effort, Some(openai_harmony::chat::ReasoningEffort::Medium));
+        assert!(content.model_identity.is_some());
+        assert!(content.conversation_start_date.is_some());
+        assert!(content.channel_config.is_some());
+    }
+
+    #[test]
+    fn explicit_reasoning_and_instructions_are_preserved_without_a_second_system_message() {
+        let messages = bridge_messages_to_harmony(
+            &[
+                ChatMessage::system()
+                    .with_reasoning_effort(ReasoningEffort::Low)
+                    .with_text("Keep answers brief".to_string()),
+                ChatMessage::user().with_text("Hello".to_string()),
+            ],
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(messages.iter().filter(|message| message.author.role == ExternalRole::System).count(), 1);
+        let ExternalContent::SystemContent(content) = &messages[0].content[0] else {
+            panic!("expected a native system preamble");
+        };
+        assert_eq!(content.reasoning_effort, Some(openai_harmony::chat::ReasoningEffort::Low));
+        let ExternalContent::DeveloperContent(instructions) = &messages[1].content[0] else {
+            panic!("expected the user's instructions");
+        };
+        assert_eq!(instructions.instructions.as_deref(), Some("Keep answers brief"));
+    }
+
+    #[test]
+    fn later_turns_preserve_one_preamble_on_replay_and_do_not_repeat_it_on_append() {
+        let history = [
+            ChatMessage::user().with_text("Hello".to_string()),
+            ChatMessage::assistant().with_text("Hi".to_string()),
+            ChatMessage::user().with_text("Tell me more".to_string()),
+        ];
+
+        // The token session resets and re-encodes the full Harmony history.
+        let replay = bridge_messages_to_harmony(&history, true).unwrap();
+        let explicit_history: Vec<_> =
+            std::iter::once(ChatMessage::system().with_reasoning_effort(ReasoningEffort::Medium))
+                .chain(history.iter().cloned())
+                .collect();
+        assert_eq!(replay, bridge_messages_to_harmony(&explicit_history, true).unwrap());
+        assert_eq!(replay.iter().filter(|message| message.author.role == ExternalRole::System).count(), 1);
+
+        // Encoding also supports direct appends without resetting its state.
+        let appended = bridge_messages_to_harmony(&history[2..], false).unwrap();
+        assert_eq!(appended.len(), 1);
+        assert_eq!(appended[0].author.role, ExternalRole::User);
+        assert_eq!(appended[0], replay[3]);
+    }
+}
