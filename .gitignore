@@ -1,12 +1,7 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
+.DS_Store
 .venv/
-
-# LaTeX build artifacts
-paper/*.log
-paper/*.aux
-paper/*.xdv
-
-# Metal pack build output
-metal/build/
+__pycache__/
+*.pyc
+*.gguf
+*.safetensors
+bench/tmp/
