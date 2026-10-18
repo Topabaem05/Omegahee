@@ -38,6 +38,6 @@ paper/     historical mathematical specification, not a current measurement
 are not accepted as current results until the new plan's quality and kernel
 gates pass.
 
-`amazon/ALoDLM-8B` is installed as a separate reference model, not as a uzu
-checkpoint. It is a masked-diffusion/adaptive-recurrence model with its own
-decoder; see `docs/alodlm_feasibility_20261018.md`.
+The current 4B reference is `nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-GGUF`
+(Q5_K_M). It needs the Dory-enabled llama.cpp fork and is measured as a
+separate reference, not as a uzu checkpoint.

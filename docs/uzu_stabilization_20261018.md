@@ -50,10 +50,9 @@ uzu 기준선과 섞으면 안 된다.
 
 - GPU `Device Utilization` **95%** (다른 YOLO 학습)
 - 스왑 **6.9GB** 사용
-- 내부 디스크 여유 **11GB** (정리 전) → **17GB** (9B uzu + ALoDLM-8B + venv,
-  27B는 외장 아카이브)
+- 내부 디스크 여유 **11GB** (정리 전) → **31GB** (ALoDLM 삭제, 9B uzu만 내부)
 - 27B GGUF 38GB를 외장 `/Volumes/LinuxData/Models/qwen38-27b-archive`로 이동 완료
-- ALoDLM-8B 16.4GB를 `/Users/topamini/models/alodlm/ALoDLM-8B`에 설치
+- ALoDLM-8B는 호환성 확인 후 사용자 요청으로 삭제
 - `~/.cache/mirai` 비어 있음
 
 따라서 현재는 **측정 차단** 상태다. 다른 학습을 강제로 종료하지 않는다.

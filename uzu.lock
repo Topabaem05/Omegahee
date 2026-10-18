@@ -28,17 +28,13 @@
     }
   },
   "reference_models": {
-    "alodlm-8b": {
-      "repo": "amazon/ALoDLM-8B",
-      "revision": "2c4623d93e285bea86a940c2801eac4509862edd",
-      "path": "/Users/topamini/models/alodlm/ALoDLM-8B",
-      "weights_bytes": 16381470720,
-      "venv": "/Users/topamini/models/alodlm/venv312",
-      "python": "3.12.14",
-      "torch": "2.8.0",
-      "transformers": "4.56.1",
-      "alodlm": "0.1.0",
-      "runtime": "portable CPU fp32; optimized path is CUDA-only; no MPS",
+    "dory-4b": {
+      "repo": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-GGUF",
+      "revision": "0963c8000791e77b2b1b49aa387d92a6da9988d6",
+      "path": "/Users/topamini/models/dory/NVIDIA-Nemotron-Labs-Dory1.0-4B-Q5_K_M.gguf",
+      "sha256": "96080be49ffd67b916018b7bdef8c484762576fb52780e10ab98ac4978a660e0",
+      "size_bytes": 3673288864,
+      "runtime": "Dory-enabled llama.cpp fork 98a74c9",
       "uzu_compatible": false
     }
   },

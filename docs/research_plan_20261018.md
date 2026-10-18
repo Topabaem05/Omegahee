@@ -113,25 +113,22 @@ Phase 1에서 KV 또는 타일 병목이 확인될 때만 진행한다. 4k 디�
 - [ ] Mirai-M 4bit 대비 +2% 게이트.
 - [ ] 최종 보고서: tok/s, 표준편차, 메모리, 품질, 재현 명령.
 
-## Track B: ALoDLM-8B 참조 트랙
+## Track B: Dory 1.0-4B 참조 트랙
 
-사용자가 지정한 `amazon/ALoDLM-8B`는 uzu에 직접 넣을 수 없다. masked
-diffusion + adaptive recurrent core + exit gate를 쓰는 별도 디코더이며,
-공식 최적화 엔진은 CUDA 전용이다. uzu에 Qwen3 백본으로 넣으면 ALoDLM이
-아니라 일반 AR 근사가 된다.
+ALoDLM은 uzu 비호환·저속으로 판정해 삭제했다. 현재 4B 참조 모델은
+`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-GGUF` Q5_K_M(3.673GB)이다.
 
-- [x] 모델 카드·config·코드 확인: 16.38GB BF16, 36층, loop 10–26, depth 4.
-- [x] uzu 비호환 판정과 근거 기록: `docs/alodlm_feasibility_20261018.md`.
-- [x] 가중치 설치와 revision 고정(16.4GB, `/Users/topamini/models/alodlm/ALoDLM-8B`).
-- [x] Python 3.12 + PyTorch 2.8 portable 환경 구성(`venv312`).
-- [x] CPU BF16 스모크 테스트: 코드 프롬프트 16토큰, 0.694 tok/s,
-  prefill 11.96초, RSS 15.66GB.
-- [x] MPS BF16 실험: 같은 16토큰, 2.619 tok/s, prefill 1.08초,
-  peak 17.24GB. `tools/alodlm_bench.py`로 재현. 공식 CLI는 cpu/cuda만 허용.
+- [x] Dory 지원 llama.cpp 포크(`brianchmielNV/llama.cpp`, revision
+  `98a74c97…`) 빌드. SHA 검증 완료.
+- [x] 1/2/4 loops 기준선(128토큰, 3표본): 20.0 / 8.9 / 10.3 tok/s.
+- [ ] `--override-kv "dory.num_loops=int:N,dory.recurrent_kv_cache_mode=str:per_loop"`
+  로 loop 수를 바꾼다.
+- [x] GGUF 매니페스트: 46 fields, 507 tensors.
+- [ ] Omega-Uzu `DoryModel` adapter와 1-token parity.
+- [ ] KSC 2.38bpw 인코딩은 adapter parity 이후에만.
 
-ALoDLM을 uzu 안에서 구현하려면 새 디코더가 필요하다. 이는 Phase 0–2의
-uzu 기준선 작업과 분리하며, uzu의 테스트 모델은 계속 Qwen3.5/3.8 Mirai-M을
-쓴다.
+Dory는 uzu 모델이 아니라 별도 참조 트랙이다. uzu의 테스트 모델은 계속
+Qwen3.5-9B-M을 쓴다.
 
 ## 저장소 구조
 

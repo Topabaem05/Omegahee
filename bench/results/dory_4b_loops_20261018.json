@@ -1,0 +1,38 @@
+{
+  "model": "/Users/topamini/models/dory/NVIDIA-Nemotron-Labs-Dory1.0-4B-Q5_K_M.gguf",
+  "prompt": "Write a Python function that returns the greatest common divisor of two positive integers.",
+  "tokens": 128,
+  "context": 4096,
+  "results": {
+    "1": {
+      "speeds": [
+        19.9,
+        20.0,
+        20.7
+      ],
+      "median": 20.0,
+      "mean": 20.2,
+      "stdev": 0.43588989435406744
+    },
+    "2": {
+      "speeds": [
+        9.0,
+        8.9,
+        8.9
+      ],
+      "median": 8.9,
+      "mean": 8.933333333333334,
+      "stdev": 0.05773502691896237
+    },
+    "4": {
+      "speeds": [
+        10.3,
+        10.4,
+        10.3
+      ],
+      "median": 10.3,
+      "mean": 10.333333333333334,
+      "stdev": 0.05773502691896237
+    }
+  }
+}
