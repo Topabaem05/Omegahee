@@ -38,12 +38,12 @@ Omega-Uzu의 2.38bpw/KSC GEMV는 main에서 제거하고 아카이브했다. 다
 산출물: `docs/uzu_stabilization_20261018.md`, `bench/results/baseline_9b.json`,
 `baseline_27b.json`.
 
-- [ ] uzu `5baa58b` / `cli 0.6.9` / binary hash 고정.
-- [ ] 38GB의 이전 GGUF를 외장으로 이동해 내부 여유 확보.
-- [ ] GPU 유휴·스왑 <1GB·디스크 >20GB 확인.
-- [ ] 9B 모델 다운로드, 스모크 테스트(성능 아님).
+- [x] uzu `5baa58b` / `cli 0.6.9` / binary hash 고정.
+- [x] 38GB의 이전 GGUF를 외장으로 이동해 내부 여유 확보.
+- [ ] GPU 유휴·스왑 <1GB·디스크 >20GB 확인. (현재 GPU 96%, 스왑 6.8GB로 차단)
+- [x] 9B 모델 다운로드. 스모크 테스트는 게이트 통과 후.
 - [ ] 9B 10표본 기준선.
-- [ ] 27B 모델 다운로드, 10표본 기준선.
+- [x] 27B 모델 다운로드. 10표본 기준선은 게이트 통과 후.
 
 게이트: 10표본 중간값·표준편차가 있고, 스왑 <1GB, GPU <10%인가?
 아니면 Phase 1로 가지 않는다.

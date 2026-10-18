@@ -17,6 +17,14 @@
 | 기준 모델 | `trymirai/Qwen3.5-9B-M` (5,189,121,136 B) |
 | 대형 모델 | `trymirai/Qwen3.8-27B-M` (14.53GB + speculator 1.03GB) |
 
+로컬 자산:
+
+- 9B: `/Users/topamini/models/uzu/Qwen3.5-9B-M` (5.6GB),
+  HF revision `55740870dd4bb2a3f28221dfa3e7ab91da95e7b0`
+- 27B: `/Users/topamini/models/uzu/Qwen3.8-27B-M` (15GB, `model.safetensors` 14GB +
+  `speculator/model.safetensors` 984MB), HF revision
+  `3d1fe988a0ee35770a5051f3c89912f383adc46e`
+
 uzu 포크는 `5baa58b`에서 수정하지 않는다. 소스 변경은 Phase 2 이후에만
 하고, 그때도 새 커밋을 고정한다.
 
@@ -43,12 +51,26 @@ uzu 기준선과 섞으면 안 된다.
 
 - GPU `Device Utilization` **95%** (다른 YOLO 학습)
 - 스왑 **6.9GB** 사용
-- 내부 디스크 여유 **11GB** (정리 전)
-- 27B GGUF 38GB를 외장 `/Volumes/LinuxData/Models/qwen38-27b-archive`로 이동
+- 내부 디스크 여유 **11GB** (정리 전) → **29GB** (9B/27B uzu 모델 설치 후)
+- 27B GGUF 38GB를 외장 `/Volumes/LinuxData/Models/qwen38-27b-archive`로 이동 완료
 - `~/.cache/mirai` 비어 있음
 
 따라서 현재는 **측정 차단** 상태다. 다른 학습을 강제로 종료하지 않는다.
 GPU가 유휴가 되고 스왑이 1GB 미만으로 내려간 뒤 Phase 0을 시작한다.
+
+2026-10-18 09:40 KST 게이트 실측:
+
+```json
+{
+  "ok": false,
+  "gpu_utilization_pct": 96,
+  "swap_used_mb": 6832.0,
+  "disk_free_gb": 11.63,
+  "busy_processes": ["train_yolo_seg ..."]
+}
+```
+
+즉 지금 실행하는 어떤 tok/s도 새 기준선이 될 수 없다.
 
 ## 청정 측정 게이트
 
