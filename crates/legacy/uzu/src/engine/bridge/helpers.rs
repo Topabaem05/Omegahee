@@ -1,0 +1,272 @@
+use std::pin::Pin;
+
+use futures::{Stream, stream};
+#[cfg(feature = "capability-grammar")]
+use shoji::types::basic::Grammar as ShojiGrammar;
+use shoji::{
+    traits::backend::{Error as BackendError, chat_token::StreamOutput as ChatTokenStreamOutput},
+    types::basic::{ContextLength, SamplingMethod as ShojiSamplingMethod, SamplingPolicy as ShojiSamplingPolicy},
+};
+#[cfg(feature = "capability-grammar")]
+use tokenizers::Tokenizer;
+#[cfg(feature = "capability-grammar")]
+use uzu_engine::engine::language_model::grammar::{Grammar as UzuGrammar, GrammarConfig, GrammarError};
+use uzu_engine::{
+    backends::Backend,
+    engine::language_model::{LanguageModel, stream::SamplingMethod as UzuSamplingMethod},
+};
+
+pub fn error_stream<'a>(
+    message: String
+) -> Pin<Box<dyn Stream<Item = Result<ChatTokenStreamOutput, BackendError>> + Send + 'a>> {
+    Box::pin(stream::once(async move {
+        Err::<ChatTokenStreamOutput, BackendError>(Box::<dyn std::error::Error + Send + Sync>::from(message))
+    }))
+}
+
+#[cfg(feature = "capability-grammar")]
+pub fn get_grammar(
+    grammar: ShojiGrammar,
+    tokenizer: &Tokenizer,
+    stop_token_ids: &[i32],
+    trigger_token_sequence: Option<Vec<u64>>,
+) -> Result<UzuGrammar, GrammarError> {
+    let config = match grammar {
+        ShojiGrammar::JsonAny {
+            ..
+        } => GrammarConfig::builtin_json(),
+        ShojiGrammar::JsonSchema {
+            schema,
+        } => GrammarConfig::json_schema_simple(schema),
+        ShojiGrammar::Regex {
+            pattern,
+        } => GrammarConfig::regex(pattern, false),
+    };
+    UzuGrammar::new(&config, tokenizer, trigger_token_sequence, Some(stop_token_ids))
+}
+
+/// The token sequence of the model's end-of-thinking tag. A reasoning model
+/// opens every reply with reasoning tokens that no grammar can accept, so the
+/// grammar must stay disengaged until this sequence has been generated.
+#[cfg(feature = "capability-grammar")]
+pub fn grammar_trigger_token_sequence<B: Backend>(model: &LanguageModel<B>) -> Option<Vec<u64>> {
+    let tag = model.end_of_thinking_tag()?;
+    let token_ids: Vec<u64> =
+        model.tokenizer().encode(tag, false).ok()?.get_ids().iter().map(|token_id| u64::from(*token_id)).collect();
+    (!token_ids.is_empty()).then_some(token_ids)
+}
+
+/// Returns the end-of-thinking trigger only when it still has to be generated.
+/// Toggle-capable models render the trigger into the generation prompt when
+/// reasoning is disabled, in which case the grammar must engage immediately.
+#[cfg(feature = "capability-grammar")]
+pub fn grammar_trigger_token_sequence_for_prompt(
+    trigger_token_sequence: Option<&[u64]>,
+    prompt: &[u64],
+    tokenizer: &Tokenizer,
+) -> Option<Vec<u64>> {
+    let trigger_token_sequence = trigger_token_sequence.filter(|sequence| !sequence.is_empty())?;
+    let trailing_tokens = prompt
+        .windows(trigger_token_sequence.len())
+        .rposition(|window| window == trigger_token_sequence)
+        .map(|start| &prompt[start + trigger_token_sequence.len()..]);
+
+    let trigger_is_in_generation_prompt = trailing_tokens.is_some_and(|trailing_tokens| {
+        let Ok(trailing_tokens) = trailing_tokens.iter().copied().map(u32::try_from).collect::<Result<Vec<_>, _>>()
+        else {
+            return false;
+        };
+        tokenizer.decode(&trailing_tokens, false).is_ok_and(|suffix| suffix.trim().is_empty())
+    });
+
+    (!trigger_is_in_generation_prompt).then(|| trigger_token_sequence.to_vec())
+}
+
+pub fn get_max_context_length<B: Backend>(
+    model: &LanguageModel<B>,
+    context_length: ContextLength,
+) -> Option<u32> {
+    match context_length {
+        ContextLength::Default {
+            ..
+        } => model.recommended_context_length(),
+        ContextLength::Maximal {
+            ..
+        } => model.max_context_length(),
+        ContextLength::Custom {
+            length,
+        } => Some(length.max(0) as u32),
+    }
+}
+
+pub fn get_sampling_method<B: Backend>(
+    model: &LanguageModel<B>,
+    sampling_method: &ShojiSamplingPolicy,
+) -> Result<UzuSamplingMethod, String> {
+    match sampling_method {
+        ShojiSamplingPolicy::Default {
+            ..
+        } => Ok(model.default_sampling_method()),
+        ShojiSamplingPolicy::Custom {
+            method,
+        } => get_custom_sampling_method(method),
+    }
+}
+
+fn get_custom_sampling_method(method: &ShojiSamplingMethod) -> Result<UzuSamplingMethod, String> {
+    match method {
+        ShojiSamplingMethod::Greedy {
+            ..
+        } => Ok(UzuSamplingMethod::Greedy),
+        ShojiSamplingMethod::Stochastic {
+            temperature,
+            top_k,
+            top_p,
+            min_p,
+            repetition_penalty,
+            suffix_repetition_length,
+        } => {
+            if let Some(temperature) = temperature
+                && (temperature.is_nan() || *temperature <= 0.0)
+            {
+                return Err(format!(
+                    "stochastic sampling needs temperature > 0, got {temperature}, use greedy sampling instead"
+                ));
+            }
+            if let Some(repetition_penalty) = repetition_penalty
+                && (repetition_penalty.is_nan() || *repetition_penalty <= 0.0)
+            {
+                return Err(format!("repetition_penalty must be > 0, got {repetition_penalty}"));
+            }
+            if let Some(suffix_repetition_length) = suffix_repetition_length
+                && *suffix_repetition_length < 1
+            {
+                return Err(format!("suffix_repetition_length must be >= 1, got {suffix_repetition_length}"));
+            }
+            if repetition_penalty.is_some() && suffix_repetition_length.is_none() {
+                return Err("repetition_penalty needs suffix_repetition_length".to_string());
+            }
+            Ok(UzuSamplingMethod::Stochastic {
+                temperature: temperature.map(|value| value as f32),
+                top_k: top_k.map(|value| value as u32),
+                top_p: top_p.map(|value| value as f32),
+                min_p: min_p.map(|value| value as f32),
+                repetition_penalty: repetition_penalty.map(|value| value as f32),
+                suffix_repetition_length: suffix_repetition_length.map(|value| value as u32),
+            })
+        },
+    }
+}
+
+#[cfg(all(test, feature = "capability-grammar"))]
+mod tests {
+    use tokenizers::{Tokenizer, decoders::fuse::Fuse, models::wordlevel::WordLevel};
+
+    use super::grammar_trigger_token_sequence_for_prompt;
+
+    fn tokenizer() -> Tokenizer {
+        let model = WordLevel::builder()
+            .vocab(
+                [
+                    ("<unk>".to_string(), 0),
+                    ("</think>".to_string(), 1),
+                    ("\n\n".to_string(), 2),
+                    ("next".to_string(), 3),
+                ]
+                .into_iter()
+                .collect(),
+            )
+            .build()
+            .unwrap();
+        let mut tokenizer = Tokenizer::new(model);
+        tokenizer.with_decoder(Some(Fuse::new()));
+        tokenizer
+    }
+
+    #[test]
+    fn grammar_engages_immediately_when_prompt_closes_reasoning() {
+        let tokenizer = tokenizer();
+
+        assert_eq!(grammar_trigger_token_sequence_for_prompt(Some(&[1]), &[1, 2], &tokenizer), None);
+    }
+
+    #[test]
+    fn grammar_waits_for_trigger_when_only_history_contains_it() {
+        let tokenizer = tokenizer();
+
+        assert_eq!(grammar_trigger_token_sequence_for_prompt(Some(&[1]), &[1, 2, 3], &tokenizer), Some(vec![1]));
+    }
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use shoji::types::basic::SamplingMethod as ShojiSamplingMethod;
+    use uzu_engine::engine::language_model::stream::SamplingMethod as UzuSamplingMethod;
+
+    use super::get_custom_sampling_method;
+
+    fn stochastic(temperature: Option<f64>) -> ShojiSamplingMethod {
+        ShojiSamplingMethod::Stochastic {
+            temperature,
+            top_k: None,
+            top_p: Some(0.9),
+            min_p: None,
+            repetition_penalty: None,
+            suffix_repetition_length: None,
+        }
+    }
+
+    #[test]
+    fn stochastic_rejects_non_positive_temperature() {
+        for temperature in [0.0, -0.5, f64::NAN] {
+            assert!(get_custom_sampling_method(&stochastic(Some(temperature))).is_err(), "temperature {temperature}");
+        }
+    }
+
+    #[test]
+    fn stochastic_accepts_positive_or_unset_temperature() {
+        for temperature in [Some(0.7), None] {
+            assert!(matches!(
+                get_custom_sampling_method(&stochastic(temperature)),
+                Ok(UzuSamplingMethod::Stochastic { .. })
+            ));
+        }
+    }
+
+    fn with_repetition(
+        repetition_penalty: Option<f64>,
+        suffix_repetition_length: Option<i64>,
+    ) -> ShojiSamplingMethod {
+        ShojiSamplingMethod::Stochastic {
+            temperature: Some(0.7),
+            top_k: None,
+            top_p: Some(0.9),
+            min_p: None,
+            repetition_penalty,
+            suffix_repetition_length,
+        }
+    }
+
+    #[test]
+    fn stochastic_rejects_invalid_repetition_settings() {
+        for (penalty, suffix) in [
+            (Some(0.0), Some(64)),
+            (Some(f64::NAN), Some(64)),
+            (Some(1.1), Some(0)),
+            (None, Some(0)),
+            (Some(1.1), None),
+        ] {
+            assert!(get_custom_sampling_method(&with_repetition(penalty, suffix)).is_err(), "{penalty:?} {suffix:?}");
+        }
+    }
+
+    #[test]
+    fn stochastic_accepts_valid_repetition_settings() {
+        for (penalty, suffix) in [(Some(1.1), Some(64)), (None, None), (None, Some(64))] {
+            assert!(matches!(
+                get_custom_sampling_method(&with_repetition(penalty, suffix)),
+                Ok(UzuSamplingMethod::Stochastic { .. })
+            ));
+        }
+    }
+}
