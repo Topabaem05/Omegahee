@@ -1,5 +1,11 @@
 # Omega-Uzu vs uzu: what the numbers actually compare
 
+> **2026-10-18 정정.** 아래 51.6GB/s는 초기 측정이다. 최신 파리티 통과
+> `ksc_gemv_coalesced`는 23.4–26.3GB/s(중간값 24.6)이고, 기존 1바이트 커널은
+> 13.2–15.0GB/s다. 격차는 5.1–6.9배가 아니라 10.6–14.4배다. 최신 분석은
+> `docs/methodology_revision_20261018.md`와
+> `docs/step3_gemv_byteorder_20261018.md`를 따른다.
+
 Written 2026-10-17 on Apple M5 Pro (48 GB, macOS 27.0, Xcode 27.1).
 Every number below is either measured on this machine or explicitly labelled a
 projection. Nothing here is a marketing comparison.

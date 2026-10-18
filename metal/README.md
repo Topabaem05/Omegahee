@@ -1,5 +1,9 @@
 # Omegahee Metal 커널 팩 (M5 Pro 실측 계층)
 
+> **2026-10-18 정정.** 아래 51.6GB/s는 초기 측정이다. 최신 파리티 통과
+> `ksc_gemv_coalesced`는 23.4–26.3GB/s(중간값 24.6)이고, 기존 1바이트 커널은
+> 13.2–15.0GB/s다. 새 방법론은 `docs/methodology_revision_20261018.md`를 따른다.
+
 이 디렉터리는 `paper/uzu_omega_mathematical_algorithm_2026.tex` 9.1절 통합 로드맵이
 요구하던 Metal/실기기 계층을 Omegahee 저장소 안에서 독립적으로 구현·측정한다.
 

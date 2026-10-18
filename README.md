@@ -32,6 +32,8 @@ The numerical kernels are Python. They are the specification check for a later M
   effective-bandwidth gap between uzu and llama.cpp.
 - `docs/27b_mtp_memory_20261018.md` — why 20 tok/s is a kernel + 16 GB default-KV
   artifact, and the MTP/4k-context configuration that recovers ~1.47x.
+- `docs/methodology_revision_20261018.md` — uzu-first revision: route any new
+  quant format through `GemmTrellis`/MMA fragments instead of a standalone GEMV.
 - `docs/problem_report_20261017.md` — open blockers with measurements, and the questions
   that need a decision before more kernel work.
 - `docs/uzu_metal_kernel_mapping.md` — SIMD-group contract for the uzu crates.
