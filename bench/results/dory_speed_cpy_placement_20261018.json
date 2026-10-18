@@ -1,0 +1,242 @@
+{
+  "label": "dory-cpy-placement",
+  "provisional": true,
+  "binary": "/Users/topamini/code/uzu-omega/llama.cpp-dory/build-m5/bin/llama-completion",
+  "source": {
+    "head": "98a74c9",
+    "dirty": true,
+    "diff_sha256": "20a3e657171d0f93e2f33f53df80e84b14f0d0ad09af5f2060be7f9003efedab"
+  },
+  "source_note": null,
+  "model": "/Users/topamini/models/dory/NVIDIA-Nemotron-Labs-Dory1.0-4B-Q5_K_M.gguf",
+  "prompt": "Write a Python function that returns the greatest common divisor of two positive integers.",
+  "tokens": 128,
+  "context": 4096,
+  "flash_attn": "on",
+  "gate_before": {
+    "ok": false,
+    "gpu_utilization_pct": 0,
+    "swap_used_mb": 4231.81,
+    "disk_free_gb": 10.79,
+    "busy_processes": [],
+    "thresholds": {
+      "max_gpu_pct": 10,
+      "max_swap_mb": 1024.0,
+      "min_disk_gb": 20.0
+    },
+    "reasons": [
+      "swap 4232MB > 1024MB",
+      "disk free 10.8GB < 20GB"
+    ],
+    "exit_code": 1
+  },
+  "gate_after": {
+    "ok": false,
+    "gpu_utilization_pct": 96,
+    "swap_used_mb": 4159.81,
+    "disk_free_gb": 10.15,
+    "busy_processes": [],
+    "thresholds": {
+      "max_gpu_pct": 10,
+      "max_swap_mb": 1024.0,
+      "min_disk_gb": 20.0
+    },
+    "reasons": [
+      "GPU utilization 96% > 10%",
+      "swap 4160MB > 1024MB",
+      "disk free 10.2GB < 20GB"
+    ],
+    "exit_code": 1
+  },
+  "results": {
+    "1": {
+      "summary": {
+        "n": 5,
+        "median_tok_s": 61.66,
+        "mean_tok_s": 61.738,
+        "stdev_tok_s": 0.8806361337124423,
+        "min_tok_s": 60.43,
+        "max_tok_s": 62.8,
+        "median_ms_per_token": 16.217969510217323
+      },
+      "samples": [
+        {
+          "returncode": 0,
+          "elapsed_s": 3.317200183868408,
+          "eval_ms": 2022.19,
+          "eval_runs": 127,
+          "tok_s": 62.8,
+          "prompt_ms": 40.44,
+          "prompt_tokens": 15,
+          "run": 1
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 2.6841931343078613,
+          "eval_ms": 2059.71,
+          "eval_runs": 127,
+          "tok_s": 61.66,
+          "prompt_ms": 64.18,
+          "prompt_tokens": 15,
+          "run": 2
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 2.64363694190979,
+          "eval_ms": 2041.11,
+          "eval_runs": 127,
+          "tok_s": 62.22,
+          "prompt_ms": 41.28,
+          "prompt_tokens": 15,
+          "run": 3
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 2.6959640979766846,
+          "eval_ms": 2062.39,
+          "eval_runs": 127,
+          "tok_s": 61.58,
+          "prompt_ms": 40.46,
+          "prompt_tokens": 15,
+          "run": 4
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 2.7405879497528076,
+          "eval_ms": 2101.7,
+          "eval_runs": 127,
+          "tok_s": 60.43,
+          "prompt_ms": 40.99,
+          "prompt_tokens": 15,
+          "run": 5
+        }
+      ]
+    },
+    "2": {
+      "summary": {
+        "n": 5,
+        "median_tok_s": 42.16,
+        "mean_tok_s": 41.962,
+        "stdev_tok_s": 0.3091439794011848,
+        "min_tok_s": 41.55,
+        "max_tok_s": 42.22,
+        "median_ms_per_token": 23.719165085388997
+      },
+      "samples": [
+        {
+          "returncode": 0,
+          "elapsed_s": 3.714383840560913,
+          "eval_ms": 3007.89,
+          "eval_runs": 127,
+          "tok_s": 42.22,
+          "prompt_ms": 62.0,
+          "prompt_tokens": 15,
+          "run": 1
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 3.6732263565063477,
+          "eval_ms": 3011.98,
+          "eval_runs": 127,
+          "tok_s": 42.16,
+          "prompt_ms": 61.26,
+          "prompt_tokens": 15,
+          "run": 2
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 3.7226290702819824,
+          "eval_ms": 3011.5,
+          "eval_runs": 127,
+          "tok_s": 42.17,
+          "prompt_ms": 62.2,
+          "prompt_tokens": 15,
+          "run": 3
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 3.717437982559204,
+          "eval_ms": 3045.18,
+          "eval_runs": 127,
+          "tok_s": 41.71,
+          "prompt_ms": 71.87,
+          "prompt_tokens": 15,
+          "run": 4
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 3.7179348468780518,
+          "eval_ms": 3056.93,
+          "eval_runs": 127,
+          "tok_s": 41.55,
+          "prompt_ms": 61.59,
+          "prompt_tokens": 15,
+          "run": 5
+        }
+      ]
+    },
+    "4": {
+      "summary": {
+        "n": 5,
+        "median_tok_s": 25.12,
+        "mean_tok_s": 24.986,
+        "stdev_tok_s": 0.23276597689524967,
+        "min_tok_s": 24.64,
+        "max_tok_s": 25.16,
+        "median_ms_per_token": 39.808917197452224
+      },
+      "samples": [
+        {
+          "returncode": 0,
+          "elapsed_s": 5.984148979187012,
+          "eval_ms": 5154.32,
+          "eval_runs": 127,
+          "tok_s": 24.64,
+          "prompt_ms": 103.23,
+          "prompt_tokens": 15,
+          "run": 1
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 5.818756103515625,
+          "eval_ms": 5047.05,
+          "eval_runs": 127,
+          "tok_s": 25.16,
+          "prompt_ms": 102.36,
+          "prompt_tokens": 15,
+          "run": 2
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 5.885034084320068,
+          "eval_ms": 5047.46,
+          "eval_runs": 127,
+          "tok_s": 25.16,
+          "prompt_ms": 104.88,
+          "prompt_tokens": 15,
+          "run": 3
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 5.866121053695679,
+          "eval_ms": 5055.35,
+          "eval_runs": 127,
+          "tok_s": 25.12,
+          "prompt_ms": 103.17,
+          "prompt_tokens": 15,
+          "run": 4
+        },
+        {
+          "returncode": 0,
+          "elapsed_s": 5.9172117710113525,
+          "eval_ms": 5110.48,
+          "eval_runs": 127,
+          "tok_s": 24.85,
+          "prompt_ms": 101.28,
+          "prompt_tokens": 15,
+          "run": 5
+        }
+      ]
+    }
+  }
+}

@@ -10,6 +10,8 @@ Start here:
 - `docs/research_plan_20261018.md` — new uzu-first research plan and go/no-go gates.
 - `docs/uzu_stabilization_20261018.md` — pinned uzu version, clean-environment
   protocol, contamination audit, and current blocked status.
+- `docs/dory_speed_20261018.md` — Dory 4B decode fix in the Dory llama.cpp fork
+  (BF16 scale tensors were placed on CPU; 2.8–3.2x faster, provisional).
 - `tools/clean_env_check.py` — refuses a benchmark run when the GPU is busy,
   swap is high, disk is low, or another inference/training job is active.
 
@@ -32,6 +34,7 @@ docs/        current plan and stabilization record
 tools/       measurement gates and reproducible harnesses
 bench/       new results only; old results are in the archive tag
 omega_dory/  NumPy Dory reference adapter for the conversion track
+patches/     local patches for the Dory llama.cpp fork
 paper/       historical mathematical specification, not a current measurement
 ```
 
