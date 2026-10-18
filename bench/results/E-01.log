@@ -1,0 +1,2 @@
+E-01-copy-fusion L2 per_loop prompt_2048.json: decode 66.84 [66.75, 66.93] tok/s, upper 94.7, efficiency 70.6%, prefill 1356 tok/s
+E-01-copy-fusion L2 per_loop prompt_2048.json: decode 24.65 [24.58, 24.74] tok/s, upper 28.0, efficiency 87.9%, prefill 1375 tok/s

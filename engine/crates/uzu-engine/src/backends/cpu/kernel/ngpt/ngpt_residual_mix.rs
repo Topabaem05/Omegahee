@@ -21,10 +21,13 @@ pub fn ngpt_residual_mix<T: DataTypeRepr + Float>(
     update: *const T,
     weights: *const f32,
     output: *mut T,
+    #[optional(write_copy)] output_copy: Option<*mut T>,
     batch_size: u32,
     element_count: u32,
     epsilon: f32,
+    #[specialize] write_copy: bool,
 ) {
+    assert_eq!(output_copy.is_some(), write_copy);
     let element_count = element_count as usize;
     let mut mixed = vec![0.0f32; element_count];
     for row in 0..batch_size as usize {
@@ -41,7 +44,11 @@ pub fn ngpt_residual_mix<T: DataTypeRepr + Float>(
         }
         let mixed_inv = inverse_l2_norm(mixed.iter().copied(), epsilon);
         for (index, value) in mixed.iter().enumerate() {
-            unsafe { *output.add(row * element_count + index) = T::from(value * mixed_inv).unwrap() };
+            let result = T::from(value * mixed_inv).unwrap();
+            unsafe { *output.add(row * element_count + index) = result };
+            if let Some(output_copy) = output_copy {
+                unsafe { *output_copy.add(row * element_count + index) = result };
+            }
         }
     }
 }

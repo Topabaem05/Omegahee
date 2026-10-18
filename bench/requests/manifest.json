@@ -1,0 +1,60 @@
+{
+  "sources": [
+    "engine/README.md",
+    "engine/docs/index.mdx",
+    "engine/docs/quick-start/chat-cloud.mdx",
+    "engine/docs/quick-start/chat-structured-output.mdx",
+    "engine/docs/quick-start/chat.mdx",
+    "engine/docs/snippets/generated/examples/python/chat-cloud.mdx",
+    "engine/docs/snippets/generated/examples/python/chat-shared-instance.mdx",
+    "engine/docs/snippets/generated/examples/python/chat-structured-output.mdx",
+    "engine/docs/snippets/generated/examples/python/chat.mdx",
+    "engine/docs/snippets/generated/examples/python/quick-start.mdx",
+    "engine/docs/snippets/generated/examples/python/tool-calls.mdx",
+    "engine/docs/snippets/generated/examples/rust/chat-cloud.mdx",
+    "engine/docs/snippets/generated/examples/rust/chat-shared-instance.mdx",
+    "engine/docs/snippets/generated/examples/rust/chat-structured-output.mdx",
+    "engine/docs/snippets/generated/examples/rust/chat.mdx",
+    "engine/docs/snippets/generated/examples/rust/quick-start.mdx",
+    "engine/docs/snippets/generated/examples/rust/tool-calls.mdx",
+    "engine/docs/snippets/generated/examples/swift/chat-cloud.mdx",
+    "engine/docs/snippets/generated/examples/swift/chat-shared-instance.mdx",
+    "engine/docs/snippets/generated/examples/swift/chat-structured-output.mdx",
+    "engine/docs/snippets/generated/examples/swift/chat.mdx",
+    "engine/docs/snippets/generated/examples/swift/quick-start.mdx",
+    "engine/docs/snippets/generated/examples/swift/tool-calls.mdx",
+    "engine/docs/snippets/generated/examples/typescript/chat-cloud.mdx",
+    "engine/docs/snippets/generated/examples/typescript/chat-shared-instance.mdx",
+    "engine/docs/snippets/generated/examples/typescript/chat-structured-output.mdx",
+    "engine/docs/snippets/generated/examples/typescript/chat.mdx",
+    "engine/docs/snippets/generated/examples/typescript/quick-start.mdx",
+    "engine/docs/snippets/generated/examples/typescript/tool-calls.mdx",
+    "engine/docs/snippets/quick-start/python-steps.mdx",
+    "engine/docs/snippets/quick-start/rust-steps.mdx",
+    "engine/docs/snippets/quick-start/swift-steps.mdx",
+    "engine/docs/snippets/quick-start/typescript-steps.mdx",
+    "converter/README.md",
+    "engine/scripts/benchmarks/README.md",
+    "reference/vllm_pr60149_5507695/vllm/model_executor/models/dory.py",
+    "engine/LICENSE",
+    "converter/LICENSE"
+  ],
+  "max_tokens": 256,
+  "files": {
+    "prompt_128.json": {
+      "target_tokens": 128,
+      "approx_prompt_tokens": 128,
+      "sha256": "94b27a758c94ccc25579e527a9035ab9721e63061bf827ae1f21f39f96bf803c"
+    },
+    "prompt_2048.json": {
+      "target_tokens": 2048,
+      "approx_prompt_tokens": 2048,
+      "sha256": "0d36c7ec1e8568217fdcaa4e55fb0d7503e39d9fe689741228669c905bdecb1c"
+    },
+    "prompt_16384.json": {
+      "target_tokens": 16384,
+      "approx_prompt_tokens": 16384,
+      "sha256": "ddb40c5ce2df5445c6476671622a21923ff14511695d4c51e2c6ac7c5c35f5c9"
+    }
+  }
+}

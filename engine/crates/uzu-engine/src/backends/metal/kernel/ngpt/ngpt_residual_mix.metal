@@ -18,9 +18,11 @@ PUBLIC KERNEL(NgptResidualMix)(
     const device T* update,
     const device float* weights,
     device T* output,
+    device T* output_copy OPTIONAL(write_copy),
     constant uint& batch_size,
     constant uint& element_count,
     constant float& epsilon,
+    const bool write_copy SPECIALIZE,
     threadgroup float shared_sum[METAL_SIMD_SIZE],
     const ThreadContext thread_context,
     const uint batch_idx GROUPS(batch_size),
@@ -30,6 +32,9 @@ PUBLIC KERNEL(NgptResidualMix)(
   residual += row_offset;
   update += row_offset;
   output += row_offset;
+  if (write_copy) {
+    output_copy += row_offset;
+  }
 
   float residual_sum_of_squares = 0.0f;
   float update_sum_of_squares = 0.0f;
@@ -68,6 +73,10 @@ PUBLIC KERNEL(NgptResidualMix)(
     const float base = static_cast<float>(static_cast<T>(static_cast<float>(residual[i]) * residual_inv));
     const float target = static_cast<float>(static_cast<T>(static_cast<float>(update[i]) * update_inv));
     const float mixed = base + weights[i] * (target - base);
-    output[i] = static_cast<T>(mixed * mixed_inv);
+    const T result = static_cast<T>(mixed * mixed_inv);
+    output[i] = result;
+    if (write_copy) {
+      output_copy[i] = result;
+    }
   }
 }

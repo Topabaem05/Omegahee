@@ -11,12 +11,12 @@
                 "groups": [
                     {
                         "type": "greedy",
-                        "name": "role"
+                        "name": "role",
+                        "capturing_limit": 2
                     },
                     {
-                        "type": "open",
+                        "type": "greedy",
                         "name": "content",
-                        "open_token": "\n",
                         "groups": [
                             {
                                 "type": "bounded",

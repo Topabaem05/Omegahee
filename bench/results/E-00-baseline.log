@@ -1,0 +1,7 @@
+E-00-baseline L2 per_loop prompt_128.json: decode 25.15 [25.11, 25.24] tok/s, upper 28.0, efficiency 89.8%, prefill 1042 tok/s
+E-00-baseline L2 per_loop prompt_2048.json: decode 24.43 [24.36, 24.55] tok/s, upper 28.0, efficiency 87.2%, prefill 1329 tok/s
+E-00-baseline L2 per_loop prompt_16384.json: decode 22.77 [22.72, 22.79] tok/s, upper 28.0, efficiency 81.2%, prefill 1181 tok/s
+E-00-baseline L2 per_loop prompt_128.json: decode 70.58 [70.24, 70.69] tok/s, upper 94.7, efficiency 74.5%, prefill 1415 tok/s
+E-00-baseline L2 per_loop prompt_2048.json: decode 66.02 [65.40, 66.10] tok/s, upper 94.7, efficiency 69.7%, prefill 1335 tok/s
+E-00-baseline L2 per_loop prompt_16384.json: decode 54.40 [54.24, 54.49] tok/s, upper 94.7, efficiency 57.5%, prefill 1116 tok/s
+DONE

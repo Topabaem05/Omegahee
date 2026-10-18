@@ -25,7 +25,7 @@ fn dory_encodes_prompt_and_decodes_reply() {
         encoding.state().text(),
         "<|im_start|>system\n<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n"
     );
-    for reply in ["Hi there!<|im_end|>", "</think>Hi there!<|im_end|>"] {
+    for reply in ["Hi there!<|im_end|>", "</think>Hi there!<|im_end|>", "</think>Line one\nLine two\n\n#### 4<|im_end|>"] {
         encoding.reset().unwrap();
         encoding.encode(vec![ChatMessage::user().with_text("Hello".to_string())]).unwrap();
         for token_id in tokenizer.encode(reply, false).unwrap().get_ids() {
@@ -40,4 +40,26 @@ fn dory_encodes_prompt_and_decodes_reply() {
         let has_text = message.content.iter().any(|block| matches!(block, ChatContentBlock::Text { .. }));
         assert_eq!(has_text, reply.starts_with("</think>"));
     }
+}
+
+#[test]
+fn dory_encodes_multi_turn_history() {
+    let Some((mut encoding, tokenizer)) = encoding() else {
+        return;
+    };
+    encoding
+        .encode(vec![
+            ChatMessage::user().with_text("What is 2+2?".to_string()),
+            ChatMessage::assistant().with_text("2 + 2 = 4".to_string()),
+            ChatMessage::user().with_text("And 3+3?".to_string()),
+        ])
+        .unwrap();
+    let prompt = encoding.state().text();
+    assert!(prompt.contains("<|im_start|>assistant\n<think></think>2 + 2 = 4<|im_end|>"), "{prompt:?}");
+    for token_id in tokenizer.encode("</think>3 + 3 = 6\n\nDone.<|im_end|>", false).unwrap().get_ids() {
+        encoding.decode(vec![*token_id]).unwrap();
+    }
+    let message = encoding.state().messages.last().unwrap();
+    assert_eq!(message.role, ChatRole::Assistant {});
+    assert!(matches!(&message.content[..], [ChatContentBlock::Text { value }] if value == "3 + 3 = 6\n\nDone."));
 }

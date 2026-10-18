@@ -60,6 +60,8 @@ pub struct NgptLayer<B: Backend> {
     epsilon: f32,
     residual_weights: B::GlobalBuffer,
     residual_mix: <B::Kernels as Kernels>::NgptResidualMixKernel,
+    /// Writes the updated residual twice, so the next layer can consume one copy without a separate copy pass.
+    residual_mix_with_copy: <B::Kernels as Kernels>::NgptResidualMixKernel,
 }
 
 fn residual_epsilon<B: Backend>(
@@ -90,8 +92,10 @@ impl<B: Backend> NgptLayer<B> {
         let epsilon = residual_epsilon(residual_norm_config, layer_index)?;
         let residual_weights =
             load_learned_scale(residual_scale_config, model_dim, &parameter_tree.subtree("residual_scale"), context)?;
-        let residual_mix =
-            <B::Kernels as Kernels>::NgptResidualMixKernel::new(context, data_type).map_err(NgptLayerError::Backend)?;
+        let residual_mix = <B::Kernels as Kernels>::NgptResidualMixKernel::new(context, data_type, false)
+            .map_err(NgptLayerError::Backend)?;
+        let residual_mix_with_copy = <B::Kernels as Kernels>::NgptResidualMixKernel::new(context, data_type, true)
+            .map_err(NgptLayerError::Backend)?;
         Ok(Self {
             layer_index,
             sublayer,
@@ -99,6 +103,7 @@ impl<B: Backend> NgptLayer<B> {
             epsilon,
             residual_weights,
             residual_mix,
+            residual_mix_with_copy,
         })
     }
 
@@ -177,19 +182,30 @@ impl<B: Backend> NgptLayer<B> {
     }
 
     /// Returns the updated residual stream.
+    ///
+    /// The sublayer consumes its input buffer while the residual update still needs the input, so the
+    /// layer needs two copies of its input: `input_copy` from the previous layer, or a copy pass here.
+    /// With `emit_copy` it also returns a second copy of its output for the next layer.
     pub fn encode(
         &self,
         input: B::ScratchBuffer,
+        input_copy: Option<B::ScratchBuffer>,
+        emit_copy: bool,
         precalculated_rope: Option<&PrecalculatedRoPE<B>>,
         batch_dim: &BatchTopology,
         state: Option<MaybeMut<dyn MixerState<B>>>,
         command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
-    ) -> Result<B::ScratchBuffer, NgptLayerError<B>> {
+    ) -> Result<(B::ScratchBuffer, Option<B::ScratchBuffer>), NgptLayerError<B>> {
         let command_buffer = &mut *command_buffer.debug_group(&format!("ngpt layer {}", self.layer_index));
 
-        // The sublayer consumes its input buffer, and the residual update needs the original input.
-        let mut sublayer_input = command_buffer.allocate_scratch(input.size()).map_err(NgptLayerError::Backend)?;
-        command_buffer.encode_copy(&input, &mut sublayer_input);
+        let sublayer_input = match input_copy {
+            Some(input_copy) => input_copy,
+            None => {
+                let mut copy = command_buffer.allocate_scratch(input.size()).map_err(NgptLayerError::Backend)?;
+                command_buffer.encode_copy(&input, &mut copy);
+                copy
+            },
+        };
 
         let update = match &self.sublayer {
             NgptSublayer::Mixer(mixer) => {
@@ -202,16 +218,26 @@ impl<B: Backend> NgptLayer<B> {
         };
 
         let mut output = command_buffer.allocate_scratch(input.size()).map_err(NgptLayerError::Backend)?;
-        self.residual_mix.encode(
+        let mut output_copy = emit_copy
+            .then(|| command_buffer.allocate_scratch(input.size()))
+            .transpose()
+            .map_err(NgptLayerError::Backend)?;
+        let residual_mix = if emit_copy {
+            &self.residual_mix_with_copy
+        } else {
+            &self.residual_mix
+        };
+        residual_mix.encode(
             &input,
             &update,
             &self.residual_weights,
             &mut output,
+            output_copy.as_mut(),
             batch_dim.size(),
             self.model_dim,
             self.epsilon,
             command_buffer,
         );
-        Ok(output)
+        Ok((output, output_copy))
     }
 }

@@ -7,3 +7,4 @@ __pycache__/
 bench/tmp/
 reference/out/
 .venv-ref/
+bench/eval_runs/smoke-*

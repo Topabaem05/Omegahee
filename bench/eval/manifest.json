@@ -1,0 +1,18 @@
+{
+  "gsm8k.jsonl": {
+    "items": 200,
+    "sha256": "d341ce6cb9087eae30c63b1e3171c7e1e794add50617bf50f711d5c998521bdf"
+  },
+  "humaneval.jsonl": {
+    "items": 164,
+    "sha256": "7398be0156c6fad01cfb1a68fd4fecc0e66a47a15b4480f5ce3dc3e4783356c5"
+  },
+  "mmlu_pro.jsonl": {
+    "items": 500,
+    "sha256": "0225715eed5ceb8bff77eea175d4deed5233e7e9dd92c06ca42f7568c1f74b32"
+  },
+  "long.jsonl": {
+    "items": 20,
+    "sha256": "c4c4cefed101f422c1361c19340e8efce02cf1040568ce2bb9b4891933499bc4"
+  }
+}

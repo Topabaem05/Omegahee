@@ -70,16 +70,33 @@ fn run_residual_mix<T: DataTypeRepr + Float, B: Backend>(
     element_count: u32,
 ) -> Vec<T> {
     let context = block_on(B::Context::new()).expect("Failed to create Context");
-    let kernel = <B::Kernels as Kernels>::NgptResidualMixKernel::new(&context, T::data_type())
+    let kernel = <B::Kernels as Kernels>::NgptResidualMixKernel::new(&context, T::data_type(), true)
         .expect("Failed to create NgptResidualMixKernel");
     let residual = create_buffer_with_data::<B, T>(&context, residual);
     let update = create_buffer_with_data::<B, T>(&context, update);
     let weights = create_buffer_with_data::<B, f32>(&context, weights);
     let mut output = create_buffer::<B, T>(&context, (batch_size * element_count) as usize);
+    let mut output_copy = create_buffer::<B, T>(&context, (batch_size * element_count) as usize);
     let mut command_buffer = context.create_command_buffer(None, None).expect("Failed to create command buffer");
-    kernel.encode(&residual, &update, &weights, &mut output, batch_size, element_count, EPSILON, &mut command_buffer);
+    kernel.encode(
+        &residual,
+        &update,
+        &weights,
+        &mut output,
+        Some(&mut output_copy),
+        batch_size,
+        element_count,
+        EPSILON,
+        &mut command_buffer,
+    );
     block_on(command_buffer.end_encoding().submit().wait_until_completed()).expect("Failed to wait command buffer");
-    buffer_to_vec(&output)
+    let output: Vec<T> = buffer_to_vec(&output);
+    let output_copy: Vec<T> = buffer_to_vec(&output_copy);
+    assert!(
+        output.iter().zip(&output_copy).all(|(a, b)| a.to_f32().unwrap().to_bits() == b.to_f32().unwrap().to_bits()),
+        "both outputs must be identical"
+    );
+    output
 }
 
 fn test_residual_mix<T: DataTypeRepr + Float + Debug + Display>() {

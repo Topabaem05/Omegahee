@@ -452,6 +452,23 @@ impl<B: Backend> Transformer<B> {
         }
     }
 
+    /// Whether the step after `step_index` is an nGPT layer that reads this step's output directly
+    /// (not through the recurrent block's reinjection or loop-end normalization).
+    fn next_step_consumes_copy(
+        &self,
+        step_index: usize,
+        step_count: usize,
+    ) -> bool {
+        if step_index + 1 >= step_count {
+            return false;
+        }
+        let (step, next_step) = (self.steps[step_index], self.steps[step_index + 1]);
+        let crosses_recurrence_boundary = self.recurrence.as_ref().is_some_and(|recurrence| {
+            step.layer_index == recurrence.end - 1 || next_step.layer_index == recurrence.start
+        });
+        !crosses_recurrence_boundary && matches!(self.layers[next_step.layer_index as usize].0, Layer::Ngpt(_))
+    }
+
     pub fn speculation_supported(&self) -> bool {
         self.layers.iter().filter_map(|(layer, _rope)| layer.mixer()).all(|mixer| mixer.speculation_supported())
     }
@@ -547,8 +564,10 @@ impl<B: Backend> Transformer<B> {
         // The recurrent block's inputs and the state carried between its loops.
         let mut recurrent_inputs: Option<B::ScratchBuffer> = None;
         let mut loop_state: Option<B::ScratchBuffer> = None;
+        // A second copy of `hidden` written by the previous nGPT layer for the next one to consume.
+        let mut hidden_copy: Option<B::ScratchBuffer> = None;
 
-        for (step, step_slot) in self.steps.iter().zip(&self.step_slots).take(step_count) {
+        for (step_index, (step, step_slot)) in self.steps.iter().zip(&self.step_slots).take(step_count).enumerate() {
             let (layer, layer_rope_index) = &self.layers[step.layer_index as usize];
             let precalculated_rope = layer_rope_index.map(|i| &precalculated_ropes[i]);
 
@@ -598,7 +617,17 @@ impl<B: Backend> Transformer<B> {
                     command_buffer,
                 )?,
                 Layer::Ngpt(layer) => {
-                    layer.encode(hidden, precalculated_rope, batch_dim, layer_state, command_buffer)?
+                    let (output, output_copy) = layer.encode(
+                        hidden,
+                        hidden_copy.take(),
+                        self.next_step_consumes_copy(step_index, step_count),
+                        precalculated_rope,
+                        batch_dim,
+                        layer_state,
+                        command_buffer,
+                    )?;
+                    hidden_copy = output_copy;
+                    output
                 },
             };
 
