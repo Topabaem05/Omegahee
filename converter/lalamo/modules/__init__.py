@@ -26,6 +26,7 @@ from .embedding import (
     UntiedEmbedding,
     UntiedEmbeddingConfig,
 )
+from .learned_scale import LearnedScale, LearnedScaleConfig, ScaleTransform
 from .linear import Linear, LinearConfig
 from .mlp import (
     DenseMLP,
@@ -38,9 +39,17 @@ from .mlp import (
     RoutingFunction,
     SoftmaxRouting,
 )
+from .ngpt_layer import (
+    NGPTAttentionLayer,
+    NGPTAttentionLayerConfig,
+    NGPTLayerConfigBase,
+    NGPTMLPLayer,
+    NGPTMLPLayerConfig,
+)
 from .normalization import (
     Normalization,
     NormalizationConfig,
+    NormReduction,
     UpcastMode,
 )
 from .rope import (
@@ -93,13 +102,24 @@ from .token_mixers.kv_cache import (
     build_tree_attention_mask,
     tree_ancestor_mask,
 )
-from .transformer import Transformer, TransformerConfig, TransformerForwardPassConfig, TransformerResult
+from .transformer import (
+    ExecutionStep,
+    RecurrenceConfig,
+    RecurrentKVCacheMode,
+    Transformer,
+    TransformerConfig,
+    TransformerForwardPassConfig,
+    TransformerResult,
+)
 from .transformer_layer import (
+    NGPTLayerActivationTrace,
     PLELayer,
     PLELayerConfig,
     TransformerLayer,
     TransformerLayerActivationTrace,
+    TransformerLayerBase,
     TransformerLayerConfig,
+    TransformerLayerConfigBase,
     TransformerLayerConv,
     TransformerLayerConvConfig,
     TransformerLayerResult,
@@ -134,6 +154,7 @@ __all__ = [
     "EmbeddingBase",
     "EmbeddingConfig",
     "EmbeddingForwardPassConfig",
+    "ExecutionStep",
     "ForwardPassMode",
     "Identity",
     "KVCacheLayer",
@@ -141,6 +162,8 @@ __all__ = [
     "KeychainBroadcastMode",
     "LalamoConfig",
     "LalamoModule",
+    "LearnedScale",
+    "LearnedScaleConfig",
     "Linear",
     "LinearConfig",
     "LinearScalingRoPEConfig",
@@ -153,6 +176,13 @@ __all__ = [
     "MixerForwardPassConfig",
     "MixtureOfExperts",
     "MixtureOfExpertsConfig",
+    "NGPTAttentionLayer",
+    "NGPTAttentionLayerConfig",
+    "NGPTLayerActivationTrace",
+    "NGPTLayerConfigBase",
+    "NGPTMLPLayer",
+    "NGPTMLPLayerConfig",
+    "NormReduction",
     "Normalization",
     "NormalizationConfig",
     "PLELayer",
@@ -161,9 +191,12 @@ __all__ = [
     "PerLayerEmbedding",
     "PositionalEmbeddingSelector",
     "PositionalEmbeddings",
+    "RecurrenceConfig",
+    "RecurrentKVCacheMode",
     "RoPE",
     "RoPEConfig",
     "RoutingFunction",
+    "ScaleTransform",
     "SeparableCausalConv",
     "SeparableCausalConvConfig",
     "ShortConv",
@@ -185,7 +218,9 @@ __all__ = [
     "TransformerForwardPassConfig",
     "TransformerLayer",
     "TransformerLayerActivationTrace",
+    "TransformerLayerBase",
     "TransformerLayerConfig",
+    "TransformerLayerConfigBase",
     "TransformerLayerConv",
     "TransformerLayerConvConfig",
     "TransformerLayerResult",

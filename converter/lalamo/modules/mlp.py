@@ -28,7 +28,9 @@ from lalamo.utils.sharding import is_sharded, sharding_of, with_sharding
 from lalamo.weight_matrix import FullPrecisionMatrix, GradientEstimator, MatmulConfig
 
 from .activations import Activation
+from .learned_scale import LearnedScale, LearnedScaleConfig
 from .linear import Linear, LinearConfig
+from .normalization import Normalization, NormalizationConfig
 from .utils import call_vmapped, call_vmapped_twice
 
 __all__ = [
@@ -138,6 +140,18 @@ class DenseMLPConfig(MLPConfig):
     has_down_biases: bool
     gate_clipping: tuple[float | None, float | None] | None
     up_clipping: tuple[float | None, float | None] | None
+    up_scale_config: LearnedScaleConfig | None = None
+    gate_scale_config: LearnedScaleConfig | None = None
+    # Normalization of the hidden activations before the down projection.
+    hidden_norm_config: NormalizationConfig | None = None
+
+    @property
+    def has_hidden_transforms(self) -> bool:
+        return (
+            self.up_scale_config is not None
+            or self.gate_scale_config is not None
+            or self.hidden_norm_config is not None
+        )
 
     def init(self, initializer: Initializer, model_dim: int, hidden_dim: int) -> "DenseMLP":
         return DenseMLP(
@@ -155,6 +169,9 @@ class DenseMLPConfig(MLPConfig):
                 (model_dim,),
                 has_biases=self.has_down_biases,
             ),
+            up_scale=self.up_scale_config.init(initializer, hidden_dim) if self.up_scale_config else None,
+            gate_scale=self.gate_scale_config.init(initializer, hidden_dim) if self.gate_scale_config else None,
+            hidden_norm=self.hidden_norm_config.init(initializer, hidden_dim) if self.hidden_norm_config else None,
         )
 
     def init_mixture(
@@ -166,6 +183,8 @@ class DenseMLPConfig(MLPConfig):
         *,
         is_sharded: bool = True,
     ) -> "DenseMLP":
+        if self.has_hidden_transforms:
+            raise ValueError("Hidden scales and normalization are not supported for expert mixtures.")
         return DenseMLP(
             config=self,
             sharding_config=initializer.sharding_config,
@@ -191,6 +210,9 @@ class DenseMLPConfig(MLPConfig):
 class DenseMLP(MLPBase[DenseMLPConfig]):
     up_projection: Linear
     down_projection: Linear
+    up_scale: LearnedScale | None = None
+    gate_scale: LearnedScale | None = None
+    hidden_norm: Normalization | None = None
 
     @property
     def model_dim(self) -> int:
@@ -226,11 +248,18 @@ class DenseMLP(MLPBase[DenseMLPConfig]):
         up_proj: Float[Array, "*tokens hidden_channels"],
         gate: Float[Array, "*tokens hidden_channels"],
     ) -> Float[Array, "*tokens hidden_channels"]:
+        if self.up_scale is not None:
+            up_proj = self.up_scale(up_proj)
+        if self.gate_scale is not None:
+            gate = self.gate_scale(gate)
         if self.config.gate_clipping is not None:
             gate = jnp.clip(gate, *self.config.gate_clipping)
         if self.config.up_clipping is not None:
             up_proj = jnp.clip(up_proj, *self.config.up_clipping)
-        return up_proj * self.config.activation(gate)
+        if self.hidden_norm is None:
+            return up_proj * self.config.activation(gate)
+        hidden = (up_proj.astype(jnp.float32) * self.config.activation(gate.astype(jnp.float32))).astype(up_proj.dtype)
+        return self.hidden_norm(hidden)
 
     @eqx.filter_jit
     def call_unbatched(

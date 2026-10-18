@@ -298,7 +298,7 @@ class HFGemma4Config(HuggingFaceLMConfig):
 
         layers_base = base / "layers"
         new_layers = []
-        for i, layer in enumerate(model.transformer.layers):
+        for i, layer in enumerate(model.transformer.standard_layers):
             if layer.ple is None:
                 new_layers.append(layer)
                 continue

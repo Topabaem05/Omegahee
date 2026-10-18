@@ -9,6 +9,7 @@ from jaxtyping import Array, Bool, DTypeLike, Float, Int
 from lalamo.initializer import Initializer
 from lalamo.kernels.attention import pallas_decode_attention, stable_reduction_attention, xla_attention
 from lalamo.module import Keychain
+from lalamo.modules.learned_scale import LearnedScale, LearnedScaleConfig
 from lalamo.modules.linear import Linear, LinearConfig
 from lalamo.modules.normalization import Normalization, NormalizationConfig
 from lalamo.modules.rope import PositionalEmbeddings
@@ -114,6 +115,16 @@ class AttentionConfig(TokenMixerConfig):
     # Scale-free RMS normalization on values
     normalize_values: bool = False
     is_kv_sharing: bool = False
+    # Per-channel query scale over (heads head_channels), applied after RoPE.
+    query_scale_config: LearnedScaleConfig | None = None
+    # Per-channel scale on the gate logits before the sigmoid.
+    gate_scale_config: LearnedScaleConfig | None = None
+    # Normalization over (heads head_channels) of the gated output, before the output projection.
+    output_norm_config: NormalizationConfig | None = None
+
+    def __post_init__(self) -> None:
+        if self.gate_scale_config is not None and not self.has_gate:
+            raise ValueError("gate_scale_config requires has_gate.")
 
     def init(
         self,
@@ -166,6 +177,21 @@ class AttentionConfig(TokenMixerConfig):
         else:
             sinks = None
 
+        if self.query_scale_config is not None:
+            query_scale = self.query_scale_config.init(initializer, q_output_dim)
+        else:
+            query_scale = None
+
+        if self.gate_scale_config is not None:
+            gate_scale = self.gate_scale_config.init(initializer, q_output_dim)
+        else:
+            gate_scale = None
+
+        if self.output_norm_config is not None:
+            output_norm = self.output_norm_config.init(initializer, q_output_dim)
+        else:
+            output_norm = None
+
         return Attention(
             config=self,
             sharding_config=initializer.sharding_config,
@@ -174,6 +200,9 @@ class AttentionConfig(TokenMixerConfig):
             query_norm=query_norm,
             key_norm=key_norm,
             sinks=sinks,
+            query_scale=query_scale,
+            gate_scale=gate_scale,
+            output_norm=output_norm,
         )
 
 
@@ -185,6 +214,10 @@ class Attention(TokenMixerBase[AttentionConfig, KVCacheLayer]):
     key_norm: Normalization | None
 
     sinks: Float[Array, " heads"] | None
+
+    query_scale: LearnedScale | None = None
+    gate_scale: LearnedScale | None = None
+    output_norm: Normalization | None = None
 
     @property
     def model_dim(self) -> int:
@@ -282,6 +315,13 @@ class Attention(TokenMixerBase[AttentionConfig, KVCacheLayer]):
             gate = None
 
         queries = self._prepare_heads(queries, self.config.num_heads, self.query_norm, positional_embeddings)
+        if self.query_scale is not None:
+            scales_by_head = rearrange(
+                self.query_scale.effective_scale(),
+                "(heads head_channels) -> heads head_channels",
+                heads=self.config.num_heads,
+            )
+            queries = (queries.astype(jnp.float32) * scales_by_head).astype(queries.dtype)
 
         num_suffix_tokens, _, _ = queries.shape
         if reuse_cache:
@@ -340,8 +380,15 @@ class Attention(TokenMixerBase[AttentionConfig, KVCacheLayer]):
             heads=self.config.num_heads,
             head_channels=self.config.head_dim,
         )
-        if gate is not None:
+        if gate is not None and self.gate_scale is not None:
+            gate_probabilities = jax.nn.sigmoid(self.gate_scale(gate.astype(jnp.float32)))
+            attention_output = (attention_output.astype(jnp.float32) * gate_probabilities).astype(
+                attention_output.dtype,
+            )
+        elif gate is not None:
             attention_output = attention_output * jax.nn.sigmoid(gate)
+        if self.output_norm is not None:
+            attention_output = call_vmapped(self.output_norm, attention_output)
         (result,) = call_vmapped(
             self.out_projection,
             attention_output,

@@ -383,12 +383,13 @@ def _classifier_template() -> Classifier:
 
 def _classifier_weights(classifier: Classifier) -> Mapping[str, Array]:
     assert isinstance(classifier.embedding, TiedEmbedding)
-    layer = classifier.transformer.layers[0]
+    layer, *_ = classifier.transformer.standard_layers
     assert isinstance(layer.mixer, Attention)
     assert isinstance(layer.mlp, DenseMLP)
     assert layer.pre_mlp_norm is not None
     assert classifier.embedding_norm.scales is not None
     assert layer.pre_mlp_norm.scales is not None
+    assert classifier.transformer.output_norm is not None
     assert classifier.transformer.output_norm.scales is not None
     assert classifier.prediction_head.norm.scales is not None
 

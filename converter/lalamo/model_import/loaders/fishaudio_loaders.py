@@ -345,8 +345,9 @@ def load_transformer_block(
 
     transformer_layers = tuple(
         load_transformer_layer_local(layer, weights_dict, base_path / layers_name / i)
-        for i, layer in enumerate(module.layers)
+        for i, layer in enumerate(module.standard_layers)
     )
+    assert module.output_norm is not None
     output_norm = load_rmsnorm(module.output_norm, weights_dict, base_path / norm_name)
 
     return load_as_at(

@@ -29,6 +29,7 @@ from transformers.models.qwen3_next.modeling_qwen3_next import Qwen3NextDecoderL
 
 from lalamo.modules.classifier import ClassifierResult
 from lalamo.modules.decoder import DecoderResult
+from lalamo.modules.transformer_layer import TransformerLayerActivationTrace
 from lalamo.utils.torch_interop import jax_to_torch, torch_to_jax
 from tests.common import assert_close
 from tests.tracer.tracer import ActivationTrace, DType, InferenceResult, ModelTracer
@@ -556,7 +557,7 @@ class ModernBertTracer(
         layer_result = full_activation_trace.layer_results[layer_index]
         position_ids = full_activation_trace.token_positions
         activation_trace = layer_result.activation_trace
-        assert activation_trace is not None
+        assert isinstance(activation_trace, TransformerLayerActivationTrace)
 
         use_global_attention = layer_index % ref_layer.config.global_attn_every_n_layers == 0
 

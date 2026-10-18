@@ -1314,8 +1314,9 @@ def load_huggingface_decoder(
             layout.permute_conv,
             implementation=implementation,
         )
-        for i, layer in enumerate(module.transformer.layers)
+        for i, layer in enumerate(module.transformer.standard_layers)
     )
+    assert module.transformer.output_norm is not None
     output_norm = load_rmsnorm(module.transformer.output_norm, weights_dict, layout.decoder_path / layout.norm_key)
     return load_as_at(
         lambda m: (m.embedding, m.transformer.layers, m.transformer.output_norm),
@@ -1437,8 +1438,9 @@ def load_huggingface_classifier(
 
     decoder_layers = tuple(
         load_transformer_layer_local(layer, weights_dict, decoder_path / "layers" / i)
-        for i, layer in enumerate(module.transformer.layers)
+        for i, layer in enumerate(module.transformer.standard_layers)
     )
+    assert module.transformer.output_norm is not None
     output_norm = load_rmsnorm(module.transformer.output_norm, weights_dict, decoder_path / "final_norm")
     head_dense = load_linear(
         module.prediction_head.dense,

@@ -29,6 +29,7 @@ from lalamo.modules.decoder import (
     DecoderForwardPassConfig,
     DecoderResult,
 )
+from lalamo.modules.transformer_layer import TransformerLayerActivationTrace
 from lalamo.utils.memory import get_available_bytes_on_default_device
 from lalamo.utils.sharding import ShardingConfig
 from tests.common import assert_close, checkify_forward
@@ -271,7 +272,7 @@ class ModelTracer[ArrayT, LayerT, RMSNormT, AttentionT, MlpT]:
     def match_layer(self, ref_layer: LayerT, layer_index: int, full_activation_trace: ActivationTrace) -> None:
         layer_result = full_activation_trace.layer_results[layer_index]
         activation_trace = layer_result.activation_trace
-        assert activation_trace is not None
+        assert isinstance(activation_trace, TransformerLayerActivationTrace)
 
         ref_pre_attention_norm = self.layer_pre_attention_norm(ref_layer)
         self.match_rmsnorm(

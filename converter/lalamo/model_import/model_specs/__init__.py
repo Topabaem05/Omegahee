@@ -23,6 +23,7 @@ from .mirai import MIRAI_CLASSIFIER_MODELS
 from .mistral import MISTRAL_MODELS
 from .muse_glimmer import MUSE_GLIMMER_MODELS
 from .nanbeige import NANBEIGE_MODELS
+from .nvidia import NVIDIA_MODELS
 from .phi import PHI_MODELS
 from .polaris import POLARIS_MODELS
 from .qwen import QWEN_MODELS
@@ -58,6 +59,7 @@ ALL_MODEL_LISTS = [
     REKA_MODELS,
     MIRAI_CLASSIFIER_MODELS,
     NANBEIGE_MODELS,
+    NVIDIA_MODELS,
     RNJ_MODELS,
     BONSAI_MODELS,
     TTS_MODELS,

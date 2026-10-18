@@ -80,6 +80,7 @@ extra = [
   "Qwen/Qwen2.5-Coder-14B-Instruct",
   "Qwen/Qwen2.5-Coder-32B-Instruct",
   "Qwen/Qwen3-4B",
+  "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
   "Qwen/Qwen3-4B-MLX-4bit",
   "Qwen/Qwen3-32B",
   "mlx-community/Qwen3.5-0.8B-MLX-8bit",

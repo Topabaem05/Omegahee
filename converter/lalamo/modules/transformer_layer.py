@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Self
@@ -12,6 +13,7 @@ from jaxtyping import Array, DTypeLike, Float, Int
 from lalamo.exportable import Exportable
 from lalamo.initializer import Initializer
 from lalamo.module import ForwardPassMode, Keychain, LalamoConfig, LalamoModule, LogicalAxis
+from lalamo.utils.registry_abc import RegistryABC
 from lalamo.weight_matrix import GradientEstimator, MatmulConfig
 
 from .activations import Activation
@@ -30,13 +32,16 @@ from .token_mixers.convolutions import SeparableCausalConv, SeparableCausalConvC
 from .utils import call_vmapped, call_vmapped_twice, gather_suffix_tokens
 
 __all__ = [
+    "NGPTLayerActivationTrace",
     "PLELayer",
     "PLELayerConfig",
     "PositionalEmbeddingSelector",
     "TransformerForwardPassConfig",
     "TransformerLayer",
     "TransformerLayerActivationTrace",
+    "TransformerLayerBase",
     "TransformerLayerConfig",
+    "TransformerLayerConfigBase",
     "TransformerLayerConv",
     "TransformerLayerConvConfig",
     "TransformerLayerResult",
@@ -92,10 +97,18 @@ class TransformerLayerActivationTrace(Exportable, eqx.Module):
     post_mlp_norm: Float[Array, "batch suffix_tokens channels"] | None
 
 
+class NGPTLayerActivationTrace(Exportable, eqx.Module):
+    inputs: Float[Array, "batch suffix_tokens channels"]
+    positional_embeddings: PositionalEmbeddings | None
+    state: StateLayerBase | None
+
+    sublayer: Float[Array, "batch suffix_tokens channels"]
+
+
 class TransformerLayerResult(Exportable, eqx.Module):
     outputs: Float[Array, "batch suffix_tokens channels"]
     updated_state: StateLayerBase | None
-    activation_trace: TransformerLayerActivationTrace | None
+    activation_trace: TransformerLayerActivationTrace | NGPTLayerActivationTrace | None
 
 
 @dataclass(frozen=True)
@@ -238,7 +251,48 @@ class TransformerLayerConv(LalamoModule[TransformerLayerConvConfig]):
 
 
 @dataclass(frozen=True)
-class TransformerLayerConfig(LalamoConfig):
+class TransformerLayerConfigBase(LalamoConfig, RegistryABC):
+    hidden_dim: int | None = dataclass_field(default=None, kw_only=True)
+    kv_source_layer_index: int | None = dataclass_field(default=None, kw_only=True)
+    rope_config: RoPEConfig | None = dataclass_field(default=None, kw_only=True)
+
+    @property
+    @abstractmethod
+    def owns_state(self) -> bool: ...
+
+    @abstractmethod
+    def init(
+        self,
+        initializer: Initializer,
+        model_dim: int,
+        hidden_dim: int,
+    ) -> "TransformerLayerBase": ...
+
+
+class TransformerLayerBase[ConfigT: TransformerLayerConfigBase](LalamoModule[ConfigT]):
+    @abstractmethod
+    def __call__(
+        self,
+        inputs: Float[Array, "batch suffix_tokens channels"],
+        positional_embeddings: PositionalEmbeddings | None,
+        state: StateLayerBase | None = None,
+        return_updated_state: bool = False,
+        return_activation_trace: bool = False,
+        lengths_without_padding: Int[Array, " batch"] | None = None,
+        forward_pass_config: TransformerForwardPassConfig = TransformerForwardPassConfig(),
+        per_layer_input: Float[Array, "batch suffix_tokens ple_dim"] | None = None,
+        attention_parent_indices: Int[Array, " batch suffix_tokens"] | None = None,
+        return_suffix_tokens: int | None = None,
+        *,
+        keychain: Keychain,
+    ) -> TransformerLayerResult: ...
+
+    @abstractmethod
+    def init_static_state(self, batch_size: int, capacity: int, dtype: DTypeLike) -> StateLayerBase: ...
+
+
+@dataclass(frozen=True)
+class TransformerLayerConfig(TransformerLayerConfigBase):
     pre_mixer_norm_config: NormalizationConfig | None
     mixer_conv_config: TransformerLayerConvConfig | None = dataclass_field(default=None, kw_only=True)
     mixer_config: TokenMixerConfig
@@ -247,11 +301,12 @@ class TransformerLayerConfig(LalamoConfig):
     mlp_conv_config: TransformerLayerConvConfig | None = dataclass_field(default=None, kw_only=True)
     mlp_config: MLPConfig
     post_mlp_norm_config: NormalizationConfig | None
-    hidden_dim: int | None = None
     ple_config: PLELayerConfig | None = None
     has_post_layer_scalar: bool = False
-    kv_source_layer_index: int | None = None
-    rope_config: RoPEConfig | None = None
+
+    @property
+    def owns_state(self) -> bool:
+        return self.kv_source_layer_index is None
 
     def init(
         self,
@@ -289,7 +344,7 @@ class TransformerLayerConfig(LalamoConfig):
         )
 
 
-class TransformerLayer(LalamoModule[TransformerLayerConfig]):
+class TransformerLayer(TransformerLayerBase[TransformerLayerConfig]):
     pre_mixer_norm: Normalization | None
     mixer_conv: TransformerLayerConv | None
     mixer: TokenMixerBase

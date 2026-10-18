@@ -18,6 +18,7 @@ from lalamo.weight_matrix import (
     WeightMatrix,
 )
 
+from .learned_scale import LearnedScale, LearnedScaleConfig
 from .utils import apply_soft_capping
 
 __all__ = [
@@ -91,6 +92,10 @@ class EmbeddingBase[ConfigT: EmbeddingConfig](LalamoModule[ConfigT]):
     @abstractmethod
     def model_dim(self) -> int: ...
 
+    @property
+    def per_token_logit_scales(self) -> LearnedScale | None:
+        return None
+
     def _readout_logits(
         self,
         x: Float[Array, " channels"],
@@ -138,6 +143,8 @@ class EmbeddingBase[ConfigT: EmbeddingConfig](LalamoModule[ConfigT]):
         logits = logits.astype(forward_pass_config.logit_dtype)
         if self.config.logit_scale is not None:
             logits = logits * jnp.array(self.config.logit_scale, dtype=logits.dtype)
+        if self.per_token_logit_scales is not None:
+            logits = self.per_token_logit_scales(logits)
         if self.config.logit_soft_cap is not None:
             logits = apply_soft_capping(logits, self.config.logit_soft_cap)
         return logits
@@ -197,6 +204,9 @@ class TiedEmbedding(EmbeddingBase[TiedEmbeddingConfig]):
 
 @dataclass(frozen=True)
 class UntiedEmbeddingConfig(EmbeddingConfig):
+    # Per-vocabulary-entry logit scale applied after the readout projection.
+    logit_scales_config: LearnedScaleConfig | None = None
+
     def init(
         self,
         initializer: Initializer,
@@ -210,12 +220,18 @@ class UntiedEmbeddingConfig(EmbeddingConfig):
             sharding_config=initializer.sharding_config,
             input_embedding=input_embedding,
             output_embedding=output_embedding,
+            logit_scales=self.logit_scales_config.init(initializer, vocab_size) if self.logit_scales_config else None,
         )
 
 
 class UntiedEmbedding(EmbeddingBase[UntiedEmbeddingConfig]):
     input_embedding: EmbeddingMatrix
     output_embedding: WeightMatrix
+    logit_scales: LearnedScale | None = None
+
+    @property
+    def per_token_logit_scales(self) -> LearnedScale | None:
+        return self.logit_scales
 
     @property
     def embedding_matrix(self) -> EmbeddingMatrix:

@@ -1,6 +1,7 @@
 from .foreign_config import ForeignClassifierConfig, ForeignConfig, ForeignLMConfig, ForeignTTSConfig
 from .huggingface import (
     HFBonsaiConfig,
+    HFDoryConfig,
     HFGemma2Config,
     HFGemma3Config,
     HFGemma3TextConfig,
@@ -26,6 +27,7 @@ __all__ = [
     "ForeignLMConfig",
     "ForeignTTSConfig",
     "HFBonsaiConfig",
+    "HFDoryConfig",
     "HFGPTOssConfig",
     "HFGemma2Config",
     "HFGemma3Config",

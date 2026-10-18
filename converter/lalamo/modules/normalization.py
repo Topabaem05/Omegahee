@@ -10,6 +10,7 @@ from lalamo.initializer import Initializer
 from lalamo.module import LalamoConfig, LalamoModule
 
 __all__ = [
+    "NormReduction",
     "Normalization",
     "NormalizationConfig",
     "UpcastMode",
@@ -21,6 +22,11 @@ class UpcastMode(StrEnum):
     FULL_LAYER = "full_layer"
 
 
+class NormReduction(StrEnum):
+    MEAN = "mean"
+    SUM = "sum"
+
+
 @dataclass(frozen=True)
 class NormalizationConfig(LalamoConfig):
     epsilon: float
@@ -29,6 +35,7 @@ class NormalizationConfig(LalamoConfig):
     subtract_mean: bool
     has_scale: bool = True
     has_biases: bool = False
+    reduction: NormReduction = NormReduction.MEAN
 
     def __post_init__(self) -> None:
         if not self.has_scale and self.scale_offset is not None:
@@ -85,7 +92,12 @@ class Normalization(LalamoModule[NormalizationConfig]):
             mean = jnp.mean(upcasted_inputs)
             upcasted_inputs = upcasted_inputs - mean
 
-        adjusted_variance = jnp.mean(jnp.square(upcasted_inputs)) + self.config.epsilon
+        match self.config.reduction:
+            case NormReduction.MEAN:
+                squared_magnitude = jnp.mean(jnp.square(upcasted_inputs))
+            case NormReduction.SUM:
+                squared_magnitude = jnp.sum(jnp.square(upcasted_inputs))
+        adjusted_variance = squared_magnitude + self.config.epsilon
         normalized_x = upcasted_inputs * jax.lax.rsqrt(adjusted_variance)
 
         if self.config.upcast_mode == UpcastMode.ONLY_NORMALIZATION:
