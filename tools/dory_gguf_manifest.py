@@ -12,11 +12,20 @@ run this from the Dory venv, for example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
 from gguf import GGUFReader
+
+
+LARGE_ARRAYS = {
+    "tokenizer.ggml.tokens",
+    "tokenizer.ggml.token_type",
+    "tokenizer.ggml.merges",
+    "tokenizer.ggml.scores",
+}
 
 
 def scalar(value):
@@ -35,6 +44,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--all-fields", action="store_true", help="include full tokenizer arrays")
     args = ap.parse_args()
 
     reader = GGUFReader(args.model)
@@ -42,7 +52,16 @@ def main() -> int:
     for name, field in reader.fields.items():
         if name == "GGUF.version":
             continue
-        fields[name] = scalar(field.contents())
+        value = scalar(field.contents())
+        if not args.all_fields and name in LARGE_ARRAYS and isinstance(value, list):
+            payload = json.dumps(value, separators=(",", ":")).encode()
+            fields[name] = {
+                "count": len(value),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "omitted": "large tokenizer array; use --all-fields to include",
+            }
+        else:
+            fields[name] = value
     tensors = []
     for tensor in reader.tensors:
         tensors.append(
