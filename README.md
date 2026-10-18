@@ -26,6 +26,10 @@ The numerical kernels are Python. They are the specification check for a later M
   difference between budgets. `tools/uzu_budget_override.py` changes a checkpoint budget.
 - `docs/advisor_review_verification_20261018.md` — external review checked against the code:
   the 64-column encoder claim holds, the GEMV bandwidth correction does not.
+- `docs/27b_final_20261018.md` — 27B local TPS study: Mirai-M holds 23.2 tok/s at 99% of the
+  bandwidth ceiling; low-bit GGUF variants lose quality faster than they gain speed.
+- `docs/27b_quant_sweep_20261018.md` — measured GGUF speed, WikiText-2 PPL, and the
+  effective-bandwidth gap between uzu and llama.cpp.
 - `docs/problem_report_20261017.md` — open blockers with measurements, and the questions
   that need a decision before more kernel work.
 - `docs/uzu_metal_kernel_mapping.md` — SIMD-group contract for the uzu crates.
