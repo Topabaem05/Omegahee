@@ -8,6 +8,13 @@ pub enum UpcastMode {
 }
 
 #[uzu_config]
+#[serde(rename_all = "snake_case")]
+pub enum NormReduction {
+    Mean,
+    Sum,
+}
+
+#[uzu_config]
 pub struct NormalizationConfig {
     pub epsilon: f32,
     pub scale_offset: Option<f32>,
@@ -15,4 +22,5 @@ pub struct NormalizationConfig {
     pub subtract_mean: bool,
     pub has_scale: bool,
     pub has_biases: bool,
+    pub reduction: NormReduction,
 }

@@ -152,6 +152,7 @@ fn get_output<
         input.head_offset,
         input.head_count,
         input.full_layer,
+        false,
         &mut command_buffer,
     );
     block_on(command_buffer.end_encoding().submit().wait_until_completed()).expect("Failed to wait command buffer");

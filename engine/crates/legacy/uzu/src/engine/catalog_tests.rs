@@ -141,10 +141,11 @@ async fn chat_model_info_reads_capabilities_and_context_without_weights() {
     let (engine, directory) = engine().await;
     let norm = serde_json::json!({
         "epsilon": 0.00001, "scale_offset": null, "upcast_mode": "only_normalization",
-        "subtract_mean": false, "has_scale": true, "has_biases": false,
+        "subtract_mean": false, "has_scale": true, "has_biases": false, "reduction": "mean",
     });
     let layer = |length| {
         serde_json::json!({
+            "type": "TransformerLayerConfig",
             "pre_mixer_norm_config": null, "post_mixer_norm_config": null,
             "mixer_conv_config": null, "mlp_conv_config": null, "post_mlp_norm_config": null,
             "hidden_dim": null, "ple_config": null, "has_post_layer_scalar": false,
@@ -156,10 +157,12 @@ async fn chat_model_info_reads_capabilities_and_context_without_weights() {
                 "head_dim": 4, "is_causal": true, "scale": null, "sliding_window_size": null,
                 "logit_soft_cap": null, "has_sinks": false, "has_qkvg_biases": false,
                 "has_out_biases": false, "has_gate": false, "normalize_values": false, "is_kv_sharing": false,
+                "query_scale_config": null, "gate_scale_config": null, "output_norm_config": null,
             },
             "mlp_config": {
             "type": "DenseMLPConfig", "linear_config": {}, "activation": { "type": "SiLU", "alpha": 1.0 },
                 "has_up_biases": false, "has_down_biases": false, "gate_clipping": null, "up_clipping": null,
+                "up_scale_config": null, "gate_scale_config": null, "hidden_norm_config": null,
             },
         })
     };
@@ -167,7 +170,7 @@ async fn chat_model_info_reads_capabilities_and_context_without_weights() {
         "type": "LanguageModelConfig", "token_codec_config": { "type": "RawTextCodecConfig" },
         "decoder_config": {
             "embedding_config": { "type": "TiedEmbeddingConfig", "input_scale": null, "logit_soft_cap": null, "logit_scale": null },
-            "transformer_config": { "layer_configs": [layer(32768), layer(16384)], "model_dim": 4, "hidden_dim": 4, "output_norm_config": norm },
+            "transformer_config": { "layer_configs": [layer(32768), layer(16384)], "model_dim": 4, "hidden_dim": 4, "output_norm_config": norm, "recurrence": null },
             "vocab_size": 4, "ple_model_config": null, "embedding_norm_config": null,
         },
         "generation_config": {

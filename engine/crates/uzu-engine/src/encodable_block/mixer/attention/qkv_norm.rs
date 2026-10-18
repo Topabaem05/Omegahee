@@ -6,7 +6,7 @@ use crate::{
         Backend, BufferMut, CommandBuffer,
         kernel::{Kernels, QKVNormKernel},
     },
-    config::normalization::{NormalizationConfig, UpcastMode},
+    config::normalization::{NormReduction, NormalizationConfig, UpcastMode},
     data_type::DataType,
     safetensors::{ParameterLoaderError, ParameterTree},
 };
@@ -143,6 +143,7 @@ impl<B: Backend> QKVNorm<B> {
                 head_offset,
                 head_count,
                 head.config.upcast_mode == UpcastMode::FullLayer,
+                head.config.reduction == NormReduction::Sum,
                 command_buffer,
             );
         }

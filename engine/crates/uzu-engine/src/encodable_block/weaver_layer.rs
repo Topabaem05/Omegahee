@@ -91,7 +91,7 @@ impl<B: Backend> WeaverLayer<B> {
         )
         .map_err(WeaverNewError::Attention)?;
         let attention_prepare =
-            <B::Kernels as Kernels>::AttentionPrepareKernel::new(context, DATA_TYPE, ROPE_DATA_TYPE, true, true)
+            <B::Kernels as Kernels>::AttentionPrepareKernel::new(context, DATA_TYPE, ROPE_DATA_TYPE, true, true, false)
                 .map_err(WeaverNewError::Backend)?;
         let pre_attention_norm = Normalization::new(
             model_dim,
@@ -173,6 +173,7 @@ impl<B: Backend> WeaverLayer<B> {
             Some(values),
             Some(&rope.cosines),
             Some(&rope.sines),
+            None::<&B::GlobalBuffer>,
             self.num_heads,
             Some(self.num_heads),
             self.head_dim,

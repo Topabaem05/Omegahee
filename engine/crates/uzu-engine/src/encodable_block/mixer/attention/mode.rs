@@ -3,7 +3,7 @@ use crate::{
         Backend, Buffer, BufferMut, BufferRef, CommandBuffer, CommandBufferEncoding,
         kernel::{
             AttentionArguments, AttentionInput, AttentionKernel, AttentionPrepareInt8Kernel, AttentionPrepareKernel,
-            FullPrecisionInput, Int8Input,
+            FullPrecisionInput, Int8Input, ScaleColumnsKernel,
         },
     },
     data_type::DataType,
@@ -59,7 +59,19 @@ impl<B: Backend> Attention<B> {
         state: Option<MaybeMut<AttentionState<B>>>,
         command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
     ) -> Result<B::ScratchBuffer, AttentionEncodeError<B>> {
-        let qkvg = self.projection.project(hidden, batch_dim.size(), command_buffer)?;
+        let mut qkvg = self.projection.project(hidden, batch_dim.size(), command_buffer)?;
+        if let Some((gate_scales, scale_columns)) = &self.gate_scales {
+            let q_dim = self.num_q_heads * self.head_dim;
+            scale_columns.encode(
+                &mut qkvg,
+                gate_scales,
+                batch_dim.size(),
+                q_dim,
+                self.projection_dim,
+                self.projection_dim - q_dim,
+                command_buffer,
+            );
+        }
         let gate = self.has_gate.then(|| {
             qkvg.subrange(
                 (self.projection_dim - self.num_q_heads * self.head_dim) as usize * self.data_type.size_in_bytes()..,
@@ -175,6 +187,13 @@ impl<B: Backend> Attention<B> {
                 .map_err(AttentionEncodeError::Kernel)?
         };
 
+        let attention_output = match &self.output_norm {
+            Some(output_norm) => output_norm
+                .encode(&attention_output, 0, batch_dim.size(), None::<&mut B::ScratchBuffer>, command_buffer)
+                .map_err(AttentionEncodeError::Backend)?,
+            None => attention_output,
+        };
+
         Ok(self.out_projection.encode(attention_output, batch_dim.size(), command_buffer)?)
     }
 
@@ -248,6 +267,7 @@ impl<B: Backend> Attention<B> {
             output_values,
             rope.map(|rope| &rope.cosines),
             rope.map(|rope| &rope.sines),
+            self.query_scales.as_ref(),
             num_q_heads,
             append_kv.then_some(self.num_groups),
             self.head_dim,

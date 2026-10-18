@@ -2,7 +2,7 @@ use crate::{
     backends::common::{
         Backend, CommandBuffer,
         gpu_types::{kv_cache_update::Copy, ring::RingParams},
-        kernel::{AttentionKernel, KVFormat},
+        kernel::KVFormat,
     },
     encodable_block::mixer::{
         MixerState,
@@ -189,7 +189,7 @@ impl<B: Backend> AttentionState<B> {
 
         let cache = attention.ring_capacity.map_or_else(KVCacheState::full, KVCacheState::ring);
 
-        let format = if attention.kernel.supports_int8() {
+        let format = if attention.use_int8_kv {
             KVFormat::INT8
         } else {
             KVFormat::BF16

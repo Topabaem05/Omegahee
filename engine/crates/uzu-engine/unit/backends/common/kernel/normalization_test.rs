@@ -51,6 +51,7 @@ fn get_output<
         false,
         false,
         scales.is_some(),
+        false,
     )
     .expect("Failed to create NormalizationKernel");
 

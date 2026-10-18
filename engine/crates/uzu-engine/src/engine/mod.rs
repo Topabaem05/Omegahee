@@ -80,8 +80,8 @@ pub fn resolve_model_context_length(model_path: &Path) -> Result<Option<u32>, Re
     Ok(transformer
         .layer_configs
         .iter()
-        .filter(|layer| matches!(layer.mixer_config, AnyTokenMixerConfig::AttentionConfig(_)))
-        .filter_map(|layer| layer.rope_config.as_ref().map(|rope| *rope.max_sequence_length()))
+        .filter(|layer| matches!(layer.mixer_config(), Some(AnyTokenMixerConfig::AttentionConfig(_))))
+        .filter_map(|layer| layer.rope_config().as_ref().map(|rope| *rope.max_sequence_length()))
         .min())
 }
 

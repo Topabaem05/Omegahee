@@ -42,12 +42,14 @@ pub fn normalization<
     #[specialize] scale_output: bool,
     #[specialize] has_biases: bool,
     #[specialize] has_scales: bool,
+    #[specialize] sum_reduction: bool,
 ) {
     assert_eq!(shortcut.is_some(), copy_to_shortcut);
     assert_eq!(hadamard_factors.is_some(), use_hadamard);
     assert_eq!(biases.is_some(), has_biases);
     assert_eq!(scales.is_some(), has_scales);
     assert!(copy_to_shortcut || !residual_add);
+    assert!(!(sum_reduction && subtract_mean), "sum reduction is an L2 normalization without mean subtraction");
     assert!(!use_hadamard || element_count.is_multiple_of(HADAMARD_TRANSFORM_BLOCK_SIZE));
 
     let input = match in_place {
@@ -59,6 +61,11 @@ pub fn normalization<
     let epsilon = AccumT::from(epsilon).unwrap();
     let scale_offset = AccumT::from(scale_offset).unwrap();
     let element_count_accum = AccumT::from(element_count).unwrap();
+    let reduction_divisor = if sum_reduction {
+        AccumT::one()
+    } else {
+        element_count_accum
+    };
     let mut row = vec![OutputT::zero(); element_count];
 
     for batch in 0..(batch_size as usize) {
@@ -91,7 +98,7 @@ pub fn normalization<
         } else {
             AccumT::zero()
         };
-        let variance = sum_sq / element_count_accum - mean * mean;
+        let variance = sum_sq / reduction_divisor - mean * mean;
         let rms_inv = AccumT::from((variance + epsilon).to_f32().unwrap().sqrt().recip()).unwrap();
 
         // Normalization and scaling

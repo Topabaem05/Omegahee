@@ -6,7 +6,7 @@ use crate::{
         Backend, BufferMut, BufferRef, CommandBuffer, CommandBufferEncoding,
         kernel::{Kernels, NormalizationKernel},
     },
-    config::normalization::{NormalizationConfig, UpcastMode},
+    config::normalization::{NormReduction, NormalizationConfig, UpcastMode},
     data_type::DataType,
     safetensors::{ParameterLoaderError, ParameterTree},
     utils::size_for_shape::size_for_shape,
@@ -96,6 +96,7 @@ impl<B: Backend> Normalization<B> {
             scale_output,
             biases.is_some(),
             scales.is_some(),
+            config.reduction == NormReduction::Sum,
         )
         .map_err(NormalizationNewError::Backend)?;
 

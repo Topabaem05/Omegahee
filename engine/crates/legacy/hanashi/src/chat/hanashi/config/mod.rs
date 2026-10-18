@@ -30,6 +30,8 @@ pub enum HanashiConfig {
         #[serde(flatten)]
         config: HanashiResolvedConfig,
     },
+    #[serde(rename = "dory")]
+    Dory,
     #[serde(rename = "functiongemma")]
     FunctionGemma,
     #[serde(rename = "gemma-3")]
@@ -119,6 +121,7 @@ impl HanashiConfig {
 
     pub fn resolve(&self) -> Result<HanashiResolvedConfig, Error> {
         match &self {
+            HanashiConfig::Dory => resolve_bundled_config("dory"),
             HanashiConfig::FunctionGemma => resolve_bundled_config("functiongemma"),
             HanashiConfig::Gemma3 => resolve_bundled_config("gemma-3"),
             HanashiConfig::Gemma4 => resolve_bundled_config("gemma-4"),

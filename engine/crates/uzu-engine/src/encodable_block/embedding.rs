@@ -6,7 +6,7 @@ use crate::{
     backends::common::{
         Backend, BufferRef, CommandBuffer, CommandBufferEncoding, Kernels,
         kernel::{
-            LogitTransformKernel,
+            LogitTransformKernel, ScaleColumnsKernel,
             matmul::{MatmulA, MatmulArguments, MatmulDOps, MatmulKernel, MatmulOutput},
         },
     },
@@ -14,6 +14,7 @@ use crate::{
     data_type::DataType,
     encodable_block::{
         embedding_table::{EmbeddingTable, EmbeddingTableError, read_output_signs},
+        learned_scale::load_learned_scale,
         linear::{Gather, LinearEncodeError, LinearMatmulError, UntiedReadout},
     },
     safetensors::{ParameterLoaderError, ParameterTree},
@@ -53,6 +54,8 @@ pub struct Embedding<B: Backend> {
     input_scale: f32,
     data_type: DataType,
     logit_transform: Option<LogitTransform<B>>,
+    /// Effective per-vocabulary-entry logit scales, applied after the logit transform.
+    logit_scales: Option<(B::GlobalBuffer, <B::Kernels as Kernels>::ScaleColumnsKernel)>,
     vocab_size: u32,
     model_dim: u32,
 }
@@ -80,6 +83,21 @@ impl<B: Backend> Embedding<B> {
         parameter_tree: &ParameterTree<B>,
         context: &B::Context,
     ) -> Result<(Self, Option<B::GlobalBuffer>), EmbeddingError<B>> {
+        let logit_scales = match config {
+            AnyEmbeddingConfig::UntiedEmbeddingConfig(untied_config) => untied_config
+                .logit_scales_config
+                .as_ref()
+                .map(|scale_config| -> Result<_, EmbeddingError<B>> {
+                    let scales =
+                        load_learned_scale(scale_config, vocab_size, &parameter_tree.subtree("logit_scales"), context)?;
+                    let kernel = <B::Kernels as Kernels>::ScaleColumnsKernel::new(context, data_type)
+                        .map_err(EmbeddingError::BackendError)?;
+                    Ok((scales, kernel))
+                })
+                .transpose()?,
+            AnyEmbeddingConfig::TiedEmbeddingConfig(_) => None,
+        };
+
         let (tying, readout_input_hadamard_factors) = match config {
             AnyEmbeddingConfig::TiedEmbeddingConfig(_) => {
                 let embedding_tree = parameter_tree.subtree("embedding");
@@ -148,6 +166,7 @@ impl<B: Backend> Embedding<B> {
                 input_scale,
                 data_type,
                 logit_transform,
+                logit_scales,
                 vocab_size,
                 model_dim,
             },
@@ -192,6 +211,7 @@ impl<B: Backend> Embedding<B> {
         let command_buffer = &mut *command_buffer.debug_group("embedding readout");
 
         assert!(batch_dim > 0 && output_dim > 0, "Embedding readout requires non-empty dimensions");
+        let has_gather = gather_indices.is_some();
         let mut output_buffer = match &self.tying {
             EmbeddingTying::Untied {
                 output,
@@ -238,6 +258,11 @@ impl<B: Backend> Embedding<B> {
                 logit_transform.soft_cap.unwrap_or(0.0),
                 command_buffer,
             );
+        }
+
+        if apply_logit_transform && let Some((scales, scale_columns)) = &self.logit_scales {
+            assert!(!has_gather, "per-vocabulary logit scales do not support gathered readouts");
+            scale_columns.encode(&mut output_buffer, scales, batch_dim, output_dim, output_dim, 0, command_buffer);
         }
 
         Ok(output_buffer)

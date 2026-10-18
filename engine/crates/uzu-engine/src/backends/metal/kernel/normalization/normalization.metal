@@ -38,6 +38,7 @@ PUBLIC KERNEL(Normalization)(
     const bool scale_output SPECIALIZE,
     const bool has_biases SPECIALIZE,
     const bool has_scales SPECIALIZE,
+    const bool sum_reduction SPECIALIZE,
     threadgroup AccumT shared_sum[METAL_SIMD_SIZE],
     const ThreadContext thread_context,
     const uint batch_idx GROUPS(batch_size),
@@ -98,7 +99,9 @@ PUBLIC KERNEL(Normalization)(
     mean = total_sum / static_cast<AccumT>(element_count);
   }
 
-  AccumT var = total_sum_of_squares / static_cast<AccumT>(element_count) - mean * mean;
+  // Sum reduction gives the unit-L2 normalization x * rsqrt(sum(x^2) + eps).
+  const AccumT reduction_divisor = sum_reduction ? static_cast<AccumT>(1.0f) : static_cast<AccumT>(element_count);
+  AccumT var = total_sum_of_squares / reduction_divisor - mean * mean;
 
   AccumT rms_inv = rsqrt(var + static_cast<AccumT>(epsilon));
 

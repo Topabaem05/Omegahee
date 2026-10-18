@@ -11,6 +11,7 @@ PUBLIC KERNEL(AttentionPrepare) (
   device ElementT* values OPTIONAL(has_kv), // [(kv_token_offset + token), head_idx, head_dim]
   const device RopeT* cosines OPTIONAL(has_rope),
   const device RopeT* sines OPTIONAL(has_rope),
+  const device float* query_scales OPTIONAL(has_query_scales), // [num_q_heads * head_dim], applied after RoPE
   const constant uint32_t& num_q_heads,
   const constant uint32_t& num_kv_heads OPTIONAL(has_kv),
   const constant uint32_t& head_dim,
@@ -20,6 +21,7 @@ PUBLIC KERNEL(AttentionPrepare) (
   const constant uint32_t& batch_dim,
   const bool has_kv SPECIALIZE,
   const bool has_rope SPECIALIZE,
+  const bool has_query_scales SPECIALIZE,
   const uint32_t head_dim_idx AXIS(head_dim, 128),
   const uint32_t head_idx AXIS(num_q_heads + num_kv_heads.unwrap_or(0) * 2, 1),
   const uint32_t batch_idx AXIS(batch_dim, 1)
@@ -32,6 +34,10 @@ PUBLIC KERNEL(AttentionPrepare) (
   ElementT element = qkvg_head[head_dim_idx];
   if (has_rope && head_dim_idx < rope_dim && (is_query || is_key)) {
     element = apply_rope(qkvg_head, cosines, sines, batch_idx, head_dim_idx, rope_dim);
+  }
+
+  if (is_query && has_query_scales) {
+    element = static_cast<ElementT>(static_cast<float>(element) * query_scales[head_idx * head_dim + head_dim_idx]);
   }
 
   if (is_query) {
