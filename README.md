@@ -23,6 +23,7 @@ old environment, not a baseline for the new work.
 - release binary: `cli 0.6.9`
 - binary SHA-256: `00e3365fe560915decbb47182e1699c6e6f7861537ed278a993b840864189f47`
 - machine: Apple M5 Pro, 48GB, macOS 27.0
+- machine-readable pin: `uzu.lock`
 
 ## Layout
 

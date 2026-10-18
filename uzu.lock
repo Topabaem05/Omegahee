@@ -1,0 +1,30 @@
+{
+  "uzu": {
+    "source_commit": "5baa58b",
+    "binary_path": "/Users/topamini/code/jev-search-app/uzu-bench/mirai-aarch64-apple-darwin",
+    "binary_version": "cli 0.6.9",
+    "binary_sha256": "00e3365fe560915decbb47182e1699c6e6f7861537ed278a993b840864189f47"
+  },
+  "machine": {
+    "cpu": "Apple M5 Pro",
+    "memory_gb": 48,
+    "os": "macOS 27.0"
+  },
+  "models": {
+    "qwen3.5-9b-m": {
+      "repo": "trymirai/Qwen3.5-9B-M",
+      "revision": "55740870dd4bb2a3f28221dfa3e7ab91da95e7b0",
+      "path": "/Users/topamini/models/uzu/Qwen3.5-9B-M",
+      "weights_bytes": 5189121136,
+      "speculator_bytes": 755228072
+    },
+    "qwen3.8-27b-m": {
+      "repo": "trymirai/Qwen3.8-27B-M",
+      "revision": "3d1fe988a0ee35770a5051f3c89912f383adc46e",
+      "path": "/Users/topamini/models/uzu/Qwen3.8-27B-M",
+      "weights_bytes": 14532457872,
+      "speculator_bytes": 1032178224
+    }
+  },
+  "clean_gate": "tools/clean_env_check.py"
+}
