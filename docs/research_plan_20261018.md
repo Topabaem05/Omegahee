@@ -127,7 +127,9 @@ ALoDLM은 uzu 비호환·저속으로 판정해 삭제했다. 현재 4B 참조 �
 - [x] Omega-Uzu `DoryModel` adapter와 1/2/4-loop parity. 4토큰 생성이
   llama.cpp와 일치한다(`Hello! How can`).
 - [ ] KV 캐시/streaming generation.
-- [ ] KSC 2.38bpw 인코딩과 품질/속도 gate.
+- [ ] Q5_K Dory의 긴 문맥/속도 기준선.
+- [ ] KSC 2.38bpw는 **조건부 spike**로만: Dory 4B 2-loop에서 >150GB/s와
+  PPL +2%를 통과할 때만 채택. 현재 24.6GB/s로는 기본 경로가 아니다.
 
 Dory는 uzu 모델이 아니라 별도 참조 트랙이다. uzu의 테스트 모델은 계속
 Qwen3.5-9B-M을 쓴다.

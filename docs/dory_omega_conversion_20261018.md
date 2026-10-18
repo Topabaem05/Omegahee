@@ -104,12 +104,14 @@ recurrent layer의 cache slot을 물리 레이어로 공유해 KV를 한 벌만 
    - Q5_K GGUF를 `gguf.dequantize`로 float16 변환해 사용한다.
    - nGPT L2 norm, SWA/full attention, RoPE, loop 재주입, residual alpha/gate를 구현했다.
    - 1/2/4 loops에서 첫 토큰과 4토큰 greedy 생성이 llama.cpp와 일치한다.
-3. **KSC 인코딩** (다음)
+3. **KSC 인코딩** (조건부 spike, 기본 경로 아님)
    - adapter parity 후에만 가중치를 2.38075bpw KSC로 인코딩한다.
    - 독립 GEMV를 만들지 않는다. uzu `GemmTrellis`처럼 MMA fragment로 직접
      디코드되는 `Cursor<Fragment>`를 사용한다.
-   - KSC GEMV 24.6GB/s 기준으로는 Dory 4B가 2 loops 10–11 tok/s 수준이라
-     공식 포크보다 느리다. 150–200GB/s 이상이 되기 전에는 채택하지 않는다.
+   - 현재 KSC GEMV는 24.6GB/s다. Dory 4B 2 loops는 체크포인트 크기에 따라
+     6.8–13.3 tok/s로 추정되어 Q5(8.9)와 비슷하거나 느릴 수 있다. 27B는
+     3.1 tok/s로 Mirai 23.2보다 명확히 손해다.
+   - 150–200GB/s 이상 + PPL +2% 게이트를 통과하기 전에는 채택하지 않는다.
 4. **Metal 포팅** (KSC/parity 이후)
    - Python reference parity 후 Rust/Metal로 옮긴다.
    - nGPT/SWA/loop KV를 한 그래프로 융합한다.
@@ -134,6 +136,20 @@ recurrent layer의 cache slot을 물리 레이어로 공유해 KV를 한 벌만 
 
 이것은 Q5_K reference와의 **다음-토큰 parity**다. 전체 문장 품질이나 긴 문맥,
 KV 캐시, KSC 압축 후 품질을 보장하지 않는다.
+
+## KSC 손익 판정
+
+| 경로 | 4B 2-loop | 27B |
+|---|---:|---:|
+| Q5_K / Mirai 4-bit reference | 8.9 tok/s | 23.2 tok/s |
+| KSC, 현재 GEMV 24.6GB/s | 6.8–13.3 추정 | 3.1 |
+| KSC, 150GB/s | 41–81 추정 | 18.7 |
+| KSC, 200GB/s | 55–108 추정 | 24.9 |
+
+KSC는 **바이트 감소**와 **커널 손실**이 서로 상쇄된다. 4B에서는 바이트 감소가
+커서 아슬아슬하지만, 27B에서는 커널 손실이 압도한다. 여기에 2.38bpw 품질
+미측정(4B는 더 민감)과 Dory Q5_K sidecar/텐서 변환 비용이 더해진다. 따라서
+지금 KSC를 먼저 하는 것은 손해다.
 
 ## 현재 차단점
 
