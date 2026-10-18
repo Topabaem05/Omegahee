@@ -1,0 +1,69 @@
+{
+  "model": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-GGUF:Q5_K_M",
+  "sha256": "96080be49ffd67b916018b7bdef8c484762576fb52780e10ab98ac4978a660e0",
+  "reference": "Dory-enabled llama.cpp 98a74c9",
+  "adapter": "omega_dory/model.py (NumPy, full recompute)",
+  "prompt": "Hello",
+  "max_new_tokens": 4,
+  "generation": "Hello! How can",
+  "token_ids": [
+    22177,
+    1033,
+    3075,
+    1710
+  ],
+  "loops": {
+    "1": {
+      "reference": "Hello! How can",
+      "adapter": "Hello! How can",
+      "ids": [
+        22177,
+        1033,
+        3075,
+        1710
+      ]
+    },
+    "2": {
+      "reference": "Hello! How can",
+      "adapter": "Hello! How can",
+      "ids": [
+        22177,
+        1033,
+        3075,
+        1710
+      ]
+    },
+    "4": {
+      "reference": "Hello! How can",
+      "adapter": "Hello! How can",
+      "ids": [
+        22177,
+        1033,
+        3075,
+        1710
+      ]
+    }
+  },
+  "first_token_checks": {
+    "Hello": {
+      "reference": "Hello",
+      "adapter": 22177
+    },
+    "What is 2+2?": {
+      "reference": "2",
+      "adapter": 1050
+    },
+    "gcd prompt": {
+      "reference": "Here",
+      "adapter": 11745
+    }
+  },
+  "timing_seconds": {
+    "model_load": 10.5,
+    "prompt_forward_2loops": 1.31,
+    "generate_4_tokens_1loop": 3.6,
+    "generate_4_tokens_2loops": 4.06,
+    "generate_4_tokens_4loops": 8.94
+  },
+  "note": "CPU NumPy reference; not a production speed measurement. Full sequence is recomputed for each token; KV cache is not implemented yet."
+}

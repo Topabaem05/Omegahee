@@ -124,8 +124,10 @@ ALoDLM은 uzu 비호환·저속으로 판정해 삭제했다. 현재 4B 참조 �
 - [ ] `--override-kv "dory.num_loops=int:N,dory.recurrent_kv_cache_mode=str:per_loop"`
   로 loop 수를 바꾼다.
 - [x] GGUF 매니페스트: 46 fields, 507 tensors.
-- [ ] Omega-Uzu `DoryModel` adapter와 1-token parity.
-- [ ] KSC 2.38bpw 인코딩은 adapter parity 이후에만.
+- [x] Omega-Uzu `DoryModel` adapter와 1/2/4-loop parity. 4토큰 생성이
+  llama.cpp와 일치한다(`Hello! How can`).
+- [ ] KV 캐시/streaming generation.
+- [ ] KSC 2.38bpw 인코딩과 품질/속도 gate.
 
 Dory는 uzu 모델이 아니라 별도 참조 트랙이다. uzu의 테스트 모델은 계속
 Qwen3.5-9B-M을 쓴다.

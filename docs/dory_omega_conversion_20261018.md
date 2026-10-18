@@ -99,33 +99,54 @@ recurrent layer의 cache slot을 물리 레이어로 공유해 KV를 한 벌만 
    - 128토큰, 3표본 기준선: 1 loop 20.0, 2 loops 8.9, 4 loops 10.3 tok/s.
    - 4 loops가 2 loops보다 높은 값은 출력 길이/캐시 효과가 섞인 신호이므로
      절대 속도 결론으로 쓰지 않는다.
-2. **Dory adapter** (다음 코드 작업)
-   - Omega-Uzu에 `DoryModel`/`DoryLayer`를 추가한다.
-   - Q5_K GGUF를 dequantize하고 `scale`/`input_scale`을 적용한다.
-   - nGPT norm, SWA/full attention, loop 재주입, residual alpha/gate를 구현한다.
-   - 한 토큰 logits 또는 greedy 토큰이 llama.cpp와 일치하는지 parity를 잡는다.
-3. **KSC 인코딩**
+2. **Dory adapter** (완료, 2026-10-18)
+   - `omega_dory/model.py`에 `DoryModel`을 추가했다.
+   - Q5_K GGUF를 `gguf.dequantize`로 float16 변환해 사용한다.
+   - nGPT L2 norm, SWA/full attention, RoPE, loop 재주입, residual alpha/gate를 구현했다.
+   - 1/2/4 loops에서 첫 토큰과 4토큰 greedy 생성이 llama.cpp와 일치한다.
+3. **KSC 인코딩** (다음)
    - adapter parity 후에만 가중치를 2.38075bpw KSC로 인코딩한다.
    - 독립 GEMV를 만들지 않는다. uzu `GemmTrellis`처럼 MMA fragment로 직접
      디코드되는 `Cursor<Fragment>`를 사용한다.
    - KSC GEMV 24.6GB/s 기준으로는 Dory 4B가 2 loops 10–11 tok/s 수준이라
      공식 포크보다 느리다. 150–200GB/s 이상이 되기 전에는 채택하지 않는다.
-4. **Metal 포팅**
+4. **Metal 포팅** (KSC/parity 이후)
    - Python reference parity 후 Rust/Metal로 옮긴다.
    - nGPT/SWA/loop KV를 한 그래프로 융합한다.
 
+## Adapter parity 결과
+
+프롬프트 `Hello`, greedy, full recompute(아직 KV 캐시 없음):
+
+| loops | reference | adapter |
+|---:|---|---|
+| 1 | `Hello! How can` | `Hello! How can` |
+| 2 | `Hello! How can` | `Hello! How can` |
+| 4 | `Hello! How can` | `Hello! How can` |
+
+첫 토큰 추가 확인:
+
+| prompt | reference | adapter |
+|---|---|---|
+| `Hello` | `Hello` | 22177 `Hello` |
+| `What is 2+2?` | `2` | 1050 `2` |
+| GCD 코드 요청 | `Here` | 11745 `Here` |
+
+이것은 Q5_K reference와의 **다음-토큰 parity**다. 전체 문장 품질이나 긴 문맥,
+KV 캐시, KSC 압축 후 품질을 보장하지 않는다.
+
 ## 현재 차단점
 
-- Omega-Uzu에는 Dory forward가 없다. 아카이브된 ALoDLM은 단순 RMSNorm/표준
-  attention이라 Dory의 nGPT/SWA/gate를 표현하지 못한다.
-- Dory 가중치는 Q5_K + sidecar scale이라 단순 `safetensors` 변환이 아니다.
-- KSC 인코더는 행렬을 인코딩할 수 있지만, Dory 런타임과 연결되지 않았다.
-- 따라서 “변환된 체크포인트”만 만드는 것은 사용 가능한 결과가 아니다.
+- Python reference는 KV 캐시 없이 전체 시퀀스를 매 토큰 재계산한다. 생성 속도는
+  production이 아니며, 긴 문맥에서 느리다.
+- `last_loop` KV 캐시와 streaming generation은 아직 구현하지 않았다.
+- KSC 인코더는 행렬을 인코딩할 수 있지만, Dory adapter와 연결되지 않았다.
+- Metal 포트와 품질 측정은 아직이다.
 
 ## 다음 작업
 
-`DoryModel`의 Python reference를 별도 브랜치에서 구현하고, 1 loop·한 토큰
-parity를 먼저 통과시킨다. 그 뒤 2/4 loops와 KSC를 붙인다.
+다음은 `DoryModel`에 KV 캐시를 붙여 streaming generation을 구현하고, 그 뒤
+KSC 2.38075bpw 인코딩과 품질/속도 gate를 붙이는 것이다.
 
 원자료:
 

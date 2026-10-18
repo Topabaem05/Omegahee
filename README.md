@@ -28,10 +28,11 @@ old environment, not a baseline for the new work.
 ## Layout
 
 ```text
-docs/      current plan and stabilization record
-tools/     measurement gates and small reproducible harnesses
-bench/     new results only; old results are in the archive tag
-paper/     historical mathematical specification, not a current measurement
+docs/        current plan and stabilization record
+tools/       measurement gates and reproducible harnesses
+bench/       new results only; old results are in the archive tag
+omega_dory/  NumPy Dory reference adapter for the conversion track
+paper/       historical mathematical specification, not a current measurement
 ```
 
 `paper/` is kept for reference. Its projected tok/s and the old 2.38bpw claims
