@@ -1,0 +1,25 @@
+# Dory batch-2 FP4 (e2m1, group 16, BF16 scales) GEMV tiles, M5 Pro, cold weights, criterion median
+FP4_qkvg_M2/sg2_r8_in2_l8_g1 66.852 µs
+FP4_qkvg_M2/sg2_r4_in2_l8_g1 65.196 µs
+FP4_qkvg_M2/sg4_r4_in2_l16_g1 57.886 µs
+FP4_qkvg_M2/sg4_r8_in2_l16_g1 58.469 µs
+FP4_qkvg_M2/sg8_r4_in2_l32_g1 58.075 µs
+FP4_qkvg_M2/sg8_r2_in2_l32_g1 58.120 µs
+FP4_out_M2/sg2_r8_in2_l8_g1 27.595 µs
+FP4_out_M2/sg2_r4_in2_l8_g1 27.411 µs
+FP4_out_M2/sg4_r4_in2_l16_g1 23.371 µs
+FP4_out_M2/sg4_r8_in2_l16_g1 23.524 µs
+FP4_out_M2/sg8_r4_in2_l32_g1 23.157 µs
+FP4_out_M2/sg8_r2_in2_l32_g1 23.102 µs
+FP4_up_M2/sg2_r8_in2_l8_g1 92.109 µs
+FP4_up_M2/sg2_r4_in2_l8_g1 90.346 µs
+FP4_up_M2/sg4_r4_in2_l16_g1 83.424 µs
+FP4_up_M2/sg4_r8_in2_l16_g1 82.265 µs
+FP4_up_M2/sg8_r4_in2_l32_g1 81.561 µs
+FP4_up_M2/sg8_r2_in2_l32_g1 82.046 µs
+FP4_down_M2/sg2_r8_in2_l8_g1 51.234 µs
+FP4_down_M2/sg2_r4_in2_l8_g1 49.867 µs
+FP4_down_M2/sg4_r4_in2_l16_g1 41.499 µs
+FP4_down_M2/sg4_r8_in2_l16_g1 41.851 µs
+FP4_down_M2/sg8_r4_in2_l32_g1 41.057 µs
+FP4_down_M2/sg8_r2_in2_l32_g1 40.713 µs

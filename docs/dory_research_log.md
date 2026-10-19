@@ -43,6 +43,7 @@
 | E-09 | query scale이 있는 attention의 INT8 KV(전체 attention 9층), `OMEGA_INT8_KV=1` | 16K에서 전체 attention KV 읽기 절반 | wavefront INT4 r4 2K 83.99 / 16K 63.13 | 2K 83.01 [82.08, 84.05] / 16K 69.78 [69.07, 71.45] | (이 커밋) | 16K +10.5%(16K/2K 75%→84%), parity 근사 오차 증가, 품질 묶음 판정 대기 |
 | E-10 | 잔차 mix의 두 내부 norm 합을 reduction 한 번으로(barrier 9→6, 출력 비트 동일) | 단일 threadgroup 커널의 barrier 지연 | wavefront INT4 r4 83.79(ABBA 평균) | 83.84(ABBA 평균) | (기록만) | 기각(차이 없음, 되돌림) |
 | E-12 | 공식 NVFP4 부호를 엔진에서 직접 실행(FP4 GEMV, prefill은 BF16 전개 후 GEMM), 그룹 16 BF16 스케일 | INT4 바이트로 반복 층 INT8 혼합 품질 | 혼합(반복 층 INT8) 48.17 / wavefront 61.69 | 순차 60.72 [60.46, 60.88] / wavefront 69.07 [68.18, 69.31] | (이 커밋) | KL 0.0428(혼합 0.044, INT4 0.135), 품질 묶음 측정 중 |
+| E-13 | FP4 그룹 16 m=2 GEMV를 32 lane 타일(8 simdgroup, 출력 32행, 입력 2행)로 | 8 lane 타일의 batch 2 비용 1.16~1.25배 → 1.02~1.05배 | NVFP4 wavefront 69.07 | 74.44 [74.06, 74.51] (128: 81.83, 16K: 57.53) | (이 커밋) | 채택(CPU 기준 오차 동일, +7.8%) |
 
 ### 기준선 전체 (E-00, 2루프 per_loop, 워밍업 제외 5회 중앙값 [최소, 최대])
 

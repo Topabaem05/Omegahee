@@ -89,15 +89,31 @@ fn encode_once(
     Some(crate::tests::helpers::buffer_to_vec::<Metal, bf16>(&buffers.y))
 }
 
+/// Two-row FP4 (group 16) tiles: (simdgroups, results per simdgroup, input rows, lanes, group lanes).
+const FP4_SWEEP_TILES: &[(u32, u32, u32, u32, u32)] = &[(2, 8, 2, 8, 1), (8, 4, 2, 32, 1)];
+
 /// Times each candidate tile on the Dory shapes after checking its output against the default tile.
 #[uzu_bench]
 fn bench_dory_gemv_tiles(c: &mut Criterion) {
+    sweep_tiles(c, "MLX", 64, QuantizationMethod::ScaleBias, SWEEP_TILES, true);
+    sweep_tiles(c, "FP4", 16, QuantizationMethod::ScaleFp4, FP4_SWEEP_TILES, false);
+}
+
+fn sweep_tiles(
+    c: &mut Criterion,
+    label: &str,
+    group_size: u32,
+    method: QuantizationMethod,
+    tiles: &[(u32, u32, u32, u32, u32)],
+    with_readout: bool,
+) {
     use crate::backends::metal::kernel::matmul::gemv::{GemvTile, TILE_OVERRIDE};
     let context = crate::tests::util::shared_metal_context();
-    let shapes = DORY_LINEARS.iter().chain(std::iter::once(&DORY_READOUT));
+    let readout = with_readout.then_some(&DORY_READOUT);
+    let shapes = DORY_LINEARS.iter().chain(readout);
     for &(layer, k, n) in shapes {
         for m in [2u32] {
-            let input = QuantInput::<bf16>::new(m, k, n, 64, 4, QuantizationMethod::ScaleBias, 7);
+            let input = QuantInput::<bf16>::new(m, k, n, group_size, 4, method, 7);
             let mut matmul = <<Metal as Backend>::Kernels as Kernels>::MatmulKernel::new(
                 &context,
                 <bf16 as crate::data_type::DataTypeRepr>::data_type(),
@@ -108,8 +124,8 @@ fn bench_dory_gemv_tiles(c: &mut Criterion) {
             let mut check_buffers = QuantBuffers::<Metal, bf16>::allocate(&context, &input);
             TILE_OVERRIDE.with(|tile| tile.set(None));
             let expected = encode_once(&context, &mut matmul, &mut check_buffers, &input).expect("default tile");
-            let mut group = c.benchmark_group(format!("Metal/Kernel/DoryTiles/{layer}_M{m}"));
-            for &(simdgroups, results, input_rows, lanes, group_lanes) in SWEEP_TILES {
+            let mut group = c.benchmark_group(format!("Metal/Kernel/DoryTiles/{label}_{layer}_M{m}"));
+            for &(simdgroups, results, input_rows, lanes, group_lanes) in tiles {
                 let tile = GemvTile::quantized(simdgroups, results, input_rows, lanes, group_lanes);
                 TILE_OVERRIDE.with(|override_tile| override_tile.set(Some(tile)));
                 let Some(output) = encode_once(&context, &mut matmul, &mut check_buffers, &input) else {

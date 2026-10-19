@@ -109,12 +109,16 @@ pub fn two_row_batch_tile(
     if TILE_OVERRIDE.with(std::cell::Cell::get).is_some() {
         return None;
     }
-    let supported = match prologue {
-        GemmBPrologueKind::ScaleBiasDequant => bits == 4 && group == 64,
-        GemmBPrologueKind::ScaleFp4Dequant => bits == 4 && group == 16,
-        _ => false,
-    };
-    (supported && m == 2).then(|| GemvTile::quantized_output_tile(2, 16, m, 8, 1))
+    if m != 2 || bits != 4 {
+        return None;
+    }
+    match (prologue, group) {
+        (GemmBPrologueKind::ScaleBiasDequant, 64) => Some(GemvTile::quantized_output_tile(2, 16, m, 8, 1)),
+        // FP4 group 16 on Dory shapes: 32 lanes over 32 output rows, 1.02-1.05x the one-row time
+        // (the 8-lane tile above: 1.16-1.25x).
+        (GemmBPrologueKind::ScaleFp4Dequant, 16) => Some(GemvTile::quantized_output_tile(8, 32, m, 32, 1)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

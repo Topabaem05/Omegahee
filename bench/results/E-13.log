@@ -1,0 +1,3 @@
+E-13-nvfp4-wavefront-fp4tile L2 per_loop prompt_128.json: decode 81.83 [81.43, 82.66] tok/s, upper 86.1, efficiency 95.0%, prefill 816 tok/s
+E-13-nvfp4-wavefront-fp4tile L2 per_loop prompt_2048.json: decode 74.44 [74.06, 74.51] tok/s, upper 86.1, efficiency 86.4%, prefill 1423 tok/s
+E-13-nvfp4-wavefront-fp4tile L2 per_loop prompt_16384.json: decode 57.53 [56.49, 57.54] tok/s, upper 86.1, efficiency 66.8%, prefill 1165 tok/s
