@@ -16,10 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import struct
 from pathlib import Path
 
 import numpy as np
-from safetensors.numpy import load_file, save_file
 
 E2M1 = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0], np.float32)
 BLOCK = 16
@@ -55,8 +55,6 @@ def to_bf16_bits(values: np.ndarray) -> np.ndarray:
 
 def load_raw(path: Path) -> dict[str, np.ndarray]:
     # safetensors.numpy cannot express BF16/F8; read everything as raw bytes with the header shapes.
-    import struct
-
     with path.open("rb") as file:
         header_size = struct.unpack("<Q", file.read(8))[0]
         header = json.loads(file.read(header_size))
@@ -93,7 +91,7 @@ def round_to_nvfp4(weights: np.ndarray) -> np.ndarray:
 def dequantized_tensors(nvfp4: dict, rtn_source: dict | None = None) -> dict[str, tuple[str, np.ndarray]]:
     out = {}
     for name, (dtype, value) in nvfp4.items():
-        if name.endswith(".weight_scale") or name.endswith(".weight_scale_2") or name.endswith(".input_scale"):
+        if name.endswith((".weight_scale", ".weight_scale_2", ".input_scale")):
             continue
         scale = nvfp4.get(name + "_scale")
         if dtype == "U8" and scale is not None:
@@ -109,8 +107,6 @@ def dequantized_tensors(nvfp4: dict, rtn_source: dict | None = None) -> dict[str
 
 
 def write_bf16_safetensors(path: Path, tensors: dict[str, tuple[str, np.ndarray]]) -> None:
-    import struct
-
     header, offset, blobs = {}, 0, []
     for name in sorted(tensors):
         dtype, value = tensors[name]
