@@ -89,3 +89,40 @@ top-1 일치 86.7%, 2루프 top-1이 1루프 top-3 안에 있는 비율 98.4%입
 - 첫 루프를 공유하는 자기 추측(k=3, 일치율 0.9): 약 73 tok/s
 - 루프 wavefront(토큰 t의 2루프와 t+1의 1루프를 한 batch로, 일치율 0.9): 약 84 tok/s
 입니다. GEMV 효율이 오르지 않으면 어느 방법도 100 tok/s에 닿지 않습니다.
+
+### GEMV 실측과 대역폭 모형 수정 (2026-10-19)
+
+`unit/backends/metal/kernel/matmul/dory_bench.rs`로 Dory decode 모양 GEMV를 따로 쟀습니다(256MiB 순환 버퍼로 캐시를
+피함, 결과 `bench/results/gemv_dory_shapes_20261019.txt`).
+
+| GEMV(INT4 MLX g64) | batch 1 | batch 2 | batch 4 |
+|---|---|---|---|
+| qkvg 2560→10240 | 49.9µs, 275GiB/s | 65.6µs (1.31배) | 121.4µs (2.43배) |
+| out 4096→2560 | 20.1µs, 274GiB/s | 26.9µs (1.34배) | 49.3µs (2.46배) |
+| up 2560→14336 | 70.5µs, 273GiB/s | 94.9µs (1.35배) | 173.7µs (2.46배) |
+| down 7168→2560 | 37.0µs, 260GiB/s | 47.2µs (1.28배) | 84.5µs (2.28배) |
+| readout INT8 대칭 g64 2560→131072 | 1.19ms, 270GiB/s | 1.33ms | 2.19ms |
+| readout INT4 MLX g64 | 0.64ms, 273GiB/s | 0.81ms | 1.43ms |
+
+- batch 1 GEMV는 이미 약 290GB/s(가정 307GB/s의 약 95%)입니다. GEMV 자체 효율은 남은 손실의 원인이 아닙니다.
+- batch 2와 4는 GEMV 시간이 각각 약 1.3배, 2.4배입니다. 여러 토큰을 한 번에 검증하는 방법(추측 디코딩, 루프
+  wavefront)은 이 비용을 넘는 이득이 있어야 합니다. M5 Pro(16코어, Apple10)는 m=1 타일 표에서 기본값
+  `(8 simdgroup, 4 rows)`를 쓰고, m=2~7 표는 ZP 형식만 다루므로 MLX(ScaleBias) 형식은 기본 타일입니다.
+- readout을 INT4로 바꾸면 토큰당 약 0.55ms(2K에서 약 3.7%)를 줄일 수 있습니다. 품질 묶음으로 판정합니다.
+
+Dory의 attention 36층 중 27층은 sliding window 1,024이고 9층만 전체 attention입니다. 토큰당(2루프) 전체 attention
+실행은 14회, sliding 실행은 42회입니다. KV를 포함한 토큰당 읽기량은 다음과 같습니다(KV 4KB/토큰/층, BF16).
+
+| 문맥 | 가중치 | KV | 이상 시간(290GB/s) | 측정(E-03 INT4) | 나머지 |
+|---|---|---|---|---|---|
+| 128 | 3.24GB | 약 0.06GB | 약 11.4ms | 14.2ms(E-00) | 약 2.8ms |
+| 2,048 | 3.24GB | 약 0.29GB | 약 12.2ms | 14.8ms | 약 2.6ms |
+| 16,384 | 3.24GB | 약 1.12GB | 약 15.0ms | 18.4ms(E-00) | 약 3.4ms |
+
+남은 약 2.6~2.8ms(토큰당 시간의 약 19%)는 문맥 길이와 거의 무관합니다. 디코딩은 이전 forward의 GPU 출력 토큰으로
+다음 forward를 미리 인코딩하므로(`ForwardPassChaining::InFlight`) CPU 인코딩 시간은 대부분 가려집니다. 나머지는
+GPU 쪽 비용(의존 dispatch 사이의 대기, attention 핵심부, 작은 커널)으로 봅니다. 다음 측정은 커널 종류를 하나씩 빼는
+시간 ablation입니다(출력은 버리고 시간만 봄).
+
+INT8 KV는 uzu에서 전체 attention, ring 없는 층에만 쓸 수 있어 Dory에서는 9층(토큰당 14회)만 해당합니다. 2K에서
+약 1.4%, 16K에서 약 9%로 예상되어 우선순위를 낮춥니다.

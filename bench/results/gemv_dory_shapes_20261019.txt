@@ -1,0 +1,25 @@
+# Dory decode-shaped quantized GEMV, Apple M5 Pro 16-core GPU, cold weights (256 MiB pool), criterion median
+# throughput = weight bytes (codes + scales + biases) / time
+ScaleBias_BF16_gs64_4b/qkvg_M[1]K[2560]N[10240] µs 49.941 | 274.98 GiB/s
+ScaleBias_BF16_gs64_4b/qkvg_M[2]K[2560]N[10240] µs 65.568 | 209.44 GiB/s
+ScaleBias_BF16_gs64_4b/qkvg_M[4]K[2560]N[10240] µs 121.38 | 113.14 GiB/s
+ScaleBias_BF16_gs64_4b/out_M[1]K[4096]N[2560] µs 20.051 | 273.96 GiB/s
+ScaleBias_BF16_gs64_4b/out_M[2]K[4096]N[2560] µs 26.923 | 204.04 GiB/s
+ScaleBias_BF16_gs64_4b/out_M[4]K[4096]N[2560] µs 49.262 | 111.51 GiB/s
+ScaleBias_BF16_gs64_4b/up_M[1]K[2560]N[14336] µs 70.528 | 272.60 GiB/s
+ScaleBias_BF16_gs64_4b/up_M[2]K[2560]N[14336] µs 94.881 | 202.63 GiB/s
+ScaleBias_BF16_gs64_4b/up_M[4]K[2560]N[14336] µs 173.73 | 110.67 GiB/s
+ScaleBias_BF16_gs64_4b/down_M[1]K[7168]N[2560] µs 36.996 | 259.84 GiB/s
+ScaleBias_BF16_gs64_4b/down_M[2]K[7168]N[2560] µs 47.174 | 203.78 GiB/s
+ScaleBias_BF16_gs64_4b/down_M[4]K[7168]N[2560] µs 84.533 | 113.72 GiB/s
+ScaleBias_BF16_gs32_4b/qkvg_M[1]K[2560]N[10240] µs 57.298 | 266.30 GiB/s
+ScaleBias_BF16_gs32_4b/qkvg_M[2]K[2560]N[10240] µs 72.074 | 211.71 GiB/s
+ScaleBias_BF16_gs32_4b/qkvg_M[4]K[2560]N[10240] µs 125.96 | 121.14 GiB/s
+ScaleBias_BF16_gs32_4b/out_M[1]K[4096]N[2560] µs 22.777 | 267.97 GiB/s
+ScaleBias_BF16_gs32_4b/out_M[2]K[4096]N[2560] µs 29.213 | 208.93 GiB/s
+Sym_BF16_gs64_8b/readout_M[1]K[2560]N[131072] ms 1.1941 | 269.88 GiB/s
+Sym_BF16_gs64_8b/readout_M[2]K[2560]N[131072] ms 1.3258 | 243.07 GiB/s
+Sym_BF16_gs64_8b/readout_M[4]K[2560]N[131072] ms 2.1882 | 147.28 GiB/s
+ScaleBias_BF16_gs64_4b_readout/readout_M[1]K[2560]N[131072] µs 643.12 | 273.33 GiB/s
+ScaleBias_BF16_gs64_4b_readout/readout_M[2]K[2560]N[131072] µs 810.71 | 216.82 GiB/s
+ScaleBias_BF16_gs64_4b_readout/readout_M[4]K[2560]N[131072] ms 1.4330 | 122.66 GiB/s

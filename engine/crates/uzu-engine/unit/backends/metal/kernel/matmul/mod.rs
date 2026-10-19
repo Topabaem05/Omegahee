@@ -1,5 +1,6 @@
 mod a8w_bench;
 mod dispatch_paths_test;
+mod dory_bench;
 mod gemm_bench;
 mod quant_dispatch_test;
 mod quant_gemm_bench;
