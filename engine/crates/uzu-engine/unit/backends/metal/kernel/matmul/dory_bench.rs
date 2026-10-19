@@ -86,6 +86,7 @@ fn bench_dory_layers(c: &mut Criterion) {
     bench_dory_shapes(c, "Sym_BF16_gs64_8b_linears", DORY_LINEARS, 64, 8, QuantizationMethod::ScaleSymmetric);
     bench_dory_shapes(c, "Fp4_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4);
     bench_dory_shapes(c, "Fp4E4M3_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4E4M3);
+    bench_dory_shapes_with(c, "ScaleBias_BF16_gs64_4b_go", DORY_LINEARS, 64, 4, QuantizationMethod::ScaleBias, true);
     bench_dory_shapes_with(c, "Fp4_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4, true);
     bench_dory_shapes_with(c, "Fp4E4M3_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4E4M3, true);
     bench_dory_shapes(c, "ScaleBias_BF16_gs64_4b_readout", &[DORY_READOUT], 64, 4, QuantizationMethod::ScaleBias);

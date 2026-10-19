@@ -27,6 +27,16 @@ METAL_FUNC float fp8_e4m3_scaled_down(uint byte) {
   return float(as_type<half>(ushort(((byte & 0x7Fu) << 7) | ((byte & 0x80u) << 8))));
 }
 
+// Two codes of a word of eight at once, as the FP16 pair (e2m1 * 2^-14) of nibbles SHIFT / 4 and SHIFT / 4 + 4:
+// the same bit placement as fp4_e2m1_scaled_down, applied to both 16-bit halves of the word.
+template <uint SHIFT>
+METAL_FUNC half2 fp4_e2m1_pair_scaled_down(uint word) {
+  static_assert(SHIFT % 4 == 0 && SHIFT < 16, "SHIFT selects one of the four nibbles of a 16-bit half");
+  const uint magnitude = (SHIFT <= 9 ? word << (9 - SHIFT) : word >> (SHIFT - 9)) & 0x0E000E00u;
+  const uint sign = (word << (12 - SHIFT)) & 0x80008000u;
+  return as_type<half2>(magnitude | sign);
+}
+
 METAL_FUNC float fp4_e2m1_scaled_down(uint code) {
   return float(as_type<half>(ushort(((code & 7u) << 9) | ((code & 8u) << 12))));
 }

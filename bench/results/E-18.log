@@ -1,0 +1,12 @@
+paused 26300
+E-18-before-wavefront-a1 L2 per_loop prompt_2048.json: decode 77.84 [77.75, 77.89] tok/s, upper 94.5, efficiency 82.4%, prefill 1428 tok/s
+E-18-pairdecode-wavefront L2 per_loop prompt_128.json: decode 93.43 [93.15, 94.10] tok/s, upper 94.5, efficiency 98.9%, prefill 801 tok/s
+E-18-pairdecode-wavefront L2 per_loop prompt_2048.json: decode 84.30 [83.47, 84.60] tok/s, upper 94.5, efficiency 89.2%, prefill 1343 tok/s
+E-18-pairdecode-wavefront L2 per_loop prompt_16384.json: decode 63.21 [62.33, 63.31] tok/s, upper 94.5, efficiency 66.9%, prefill 1158 tok/s
+E-18-pairdecode-wavefront-b2 L2 per_loop prompt_2048.json: decode 84.49 [83.86, 84.56] tok/s, upper 94.5, efficiency 89.4%, prefill 1429 tok/s
+E-18-before-wavefront-a2 L2 per_loop prompt_2048.json: decode 77.82 [77.06, 77.86] tok/s, upper 94.5, efficiency 82.4%, prefill 1426 tok/s
+E-18-pairdecode-sequential L2 per_loop prompt_2048.json: decode 66.87 [66.85, 67.15] tok/s, upper 94.5, efficiency 70.8%, prefill 1415 tok/s
+E-18-before-sequential L2 per_loop prompt_2048.json: decode 62.70 [61.90, 62.73] tok/s, upper 94.5, efficiency 66.4%, prefill 1424 tok/s
+E-18-pairdecode-wavefront-int8kv L2 per_loop prompt_16384.json: decode 71.34 [70.45, 71.39] tok/s, upper 94.5, efficiency 75.5%, prefill 1225 tok/s
+resumed
+E18_DONE

@@ -35,9 +35,17 @@ struct QuantChunk {
   static METAL_FUNC void decode_fp4(const thread uint4 (&words)[WORDS], uint chunk, thread float (&values)[VALUES]) {
     static_assert(BITS == 4, "FP4 codes are 4-bit");
     const uint word = words[chunk / 4u][chunk % 4u];
+    // Codes i and i + 4 decode together from the two 16-bit halves of the word.
+    const half2 pairs[4] = {
+        fp4_e2m1_pair_scaled_down<0>(word),
+        fp4_e2m1_pair_scaled_down<4>(word),
+        fp4_e2m1_pair_scaled_down<8>(word),
+        fp4_e2m1_pair_scaled_down<12>(word),
+    };
     METAL_PRAGMA_UNROLL
-    for (uint i = 0; i < VALUES; i++) {
-      values[i] = fp4_e2m1_scaled_down(extract_bits(word, 4u * i, 4u));
+    for (uint i = 0; i < VALUES / 2; i++) {
+      values[i] = float(pairs[i].x);
+      values[i + VALUES / 2] = float(pairs[i].y);
     }
   }
 
