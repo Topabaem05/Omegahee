@@ -34,12 +34,28 @@ fn bench_dory_shapes(
     bits: u32,
     quant_method: QuantizationMethod,
 ) {
+    bench_dory_shapes_with(c, label, shapes, group_size, bits, quant_method, false);
+}
+
+/// `group_output`: quantization parameters stored [groups, rows], as converted output-input models hold them.
+fn bench_dory_shapes_with(
+    c: &mut Criterion,
+    label: &str,
+    shapes: &[(&str, u32, u32)],
+    group_size: u32,
+    bits: u32,
+    quant_method: QuantizationMethod,
+    group_output: bool,
+) {
     let context = crate::tests::util::shared_metal_context();
     let mut group = c.benchmark_group(format!("{}/Kernel/DoryLayers/{}", type_short_name::<Metal>(), label));
     for &(layer, k, n) in shapes {
         for m in [1u32, 2, 4] {
             let shape = Shape::new(m, k, n);
-            let input = QuantInput::<bf16>::new(m, k, n, group_size, bits, quant_method, 42);
+            let mut input = QuantInput::<bf16>::new(m, k, n, group_size, bits, quant_method, 42);
+            if group_output {
+                input = input.with_group_output();
+            }
             let mut buffers =
                 ColdPool::new(input.weight_buffer_bytes(), || QuantBuffers::<Metal, bf16>::allocate(&context, &input));
             let mut matmul = <<Metal as Backend>::Kernels as Kernels>::MatmulKernel::new(
@@ -69,6 +85,9 @@ fn bench_dory_layers(c: &mut Criterion) {
     bench_dory_shapes(c, "Sym_BF16_gs64_8b", &[DORY_READOUT], 64, 8, QuantizationMethod::ScaleSymmetric);
     bench_dory_shapes(c, "Sym_BF16_gs64_8b_linears", DORY_LINEARS, 64, 8, QuantizationMethod::ScaleSymmetric);
     bench_dory_shapes(c, "Fp4_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4);
+    bench_dory_shapes(c, "Fp4E4M3_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4E4M3);
+    bench_dory_shapes_with(c, "Fp4_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4, true);
+    bench_dory_shapes_with(c, "Fp4E4M3_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4E4M3, true);
     bench_dory_shapes(c, "ScaleBias_BF16_gs64_4b_readout", &[DORY_READOUT], 64, 4, QuantizationMethod::ScaleBias);
 }
 
@@ -207,17 +226,36 @@ fn dory_gemv_tile_accuracy() {
     }
 }
 
+/// E4M3 scale bands for the small FP4 shape: (first byte, byte count, row scale factor). The default random
+/// bytes cover exponents 4..=9; these add the subnormals and the top exponent.
+const E4M3_SCALE_BANDS: &[(u8, u8, f32)] = &[(0x01, 7, 1000.0), (0x70, 15, 0.01)];
+
 /// FP4 (e2m1, group 16) on the Metal GEMV (m = 1, 2) and the dequantize + GEMM path (m = 16) against
-/// the CPU reference, with both quantization parameter layouts.
+/// the CPU reference, with BF16 or FP8 E4M3 group scales and both quantization parameter layouts.
 #[uzu_engine_macros::uzu_test]
 fn dory_fp4_matmul_matches_cpu() {
     use crate::backends::common::kernel::matmul::QuantParamsLayout;
     let context = crate::tests::util::shared_metal_context();
     for &(layer, k, n) in &[DORY_LINEARS[0], DORY_LINEARS[3], ("small", 512, 96)] {
-        for m in [1u32, 2, 16] {
-            for params_layout in [QuantParamsLayout::OutputGroup, QuantParamsLayout::GroupOutput] {
-                let mut input = QuantInput::<bf16>::new(m, k, n, 16, 4, QuantizationMethod::ScaleFp4, 5);
+        for (m, method) in [1u32, 2, 16]
+            .into_iter()
+            .flat_map(|m| [QuantizationMethod::ScaleFp4, QuantizationMethod::ScaleFp4E4M3].map(|method| (m, method)))
+        {
+            let bands = if layer == "small" && method == QuantizationMethod::ScaleFp4E4M3 {
+                [None].into_iter().chain(E4M3_SCALE_BANDS.iter().copied().map(Some)).collect()
+            } else {
+                vec![None]
+            };
+            for (params_layout, band) in [QuantParamsLayout::OutputGroup, QuantParamsLayout::GroupOutput]
+                .into_iter()
+                .flat_map(|params_layout| bands.iter().map(move |band| (params_layout, *band)))
+            {
+                let mut input = QuantInput::<bf16>::new(m, k, n, 16, 4, method, 5);
                 input.params_layout = params_layout;
+                if let Some((first, count, factor)) = band {
+                    input.fp8_scales.iter_mut().flatten().for_each(|byte| *byte = first + *byte % count);
+                    input.row_scales.iter_mut().flatten().for_each(|row_scale| *row_scale *= factor);
+                }
                 let reference = crate::tests::matmul::quant::run_quant_cpu::<bf16>(&input);
                 let mut matmul = <<Metal as Backend>::Kernels as Kernels>::MatmulKernel::new(
                     &context,
@@ -234,8 +272,14 @@ fn dory_fp4_matmul_matches_cpu() {
                     .zip(&output)
                     .map(|(a, b)| (f32::from(*a) - f32::from(*b)).abs())
                     .fold(0.0f32, f32::max);
-                eprintln!("FP4 {layer} m{m} {params_layout:?}: max error {max_error:.3e} (output max {scale:.3e})");
-                assert!(max_error <= scale * 2e-2 + 1e-3, "FP4 {layer} m{m} {params_layout:?} mismatch: {max_error}");
+                eprintln!(
+                    "{method:?} {layer} m{m} {params_layout:?} {band:?}: max error {max_error:.3e} (output max {scale:.3e})"
+                );
+                assert!(scale > 0.1, "{method:?} {layer} m{m} {band:?}: output max {scale} too small to check");
+                assert!(
+                    max_error <= scale * 2e-2 + 1e-3,
+                    "{method:?} {layer} m{m} {params_layout:?} {band:?} mismatch: {max_error}"
+                );
             }
         }
     }

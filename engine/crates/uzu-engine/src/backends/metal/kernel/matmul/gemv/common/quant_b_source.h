@@ -55,6 +55,15 @@ struct QuantBSource {
       }
       position.group += Tile::GROUPS_PER_STEP;
     }
+    if constexpr (B_PROLOGUE == GemmBPrologueKind::ScaleFp4E4M3Dequant) {
+      Tile::for_each_output_row([&](auto output_index) UZU_ALWAYS_INLINE {
+        constexpr uint R = decltype(output_index)::value;
+        const float row_scale = ops.row_scales[weight_row_indices[R]];
+        Tile::for_each_input_row([&](auto input_index) UZU_ALWAYS_INLINE {
+          result[decltype(input_index)::value][R] *= row_scale;
+        });
+      });
+    }
   }
 };
 

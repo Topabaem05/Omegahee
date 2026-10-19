@@ -21,6 +21,7 @@ struct GemvOperands {
   const device BT* output_bias;
   const device int32_t* hadamard_factors;
   const device uint* gather_indices;
+  const device float* row_scales;
 };
 
 struct GemvParams {

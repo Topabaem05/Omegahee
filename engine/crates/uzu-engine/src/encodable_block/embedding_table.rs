@@ -4,7 +4,10 @@ use thiserror::Error;
 use crate::{
     backends::common::{
         Backend, BufferMut, BufferRef, CommandBuffer, Kernels,
-        gpu_types::{d4s4, embedding::EmbeddingTableKind, hadamard_order::HADAMARD_TRANSFORM_BLOCK_SIZE},
+        gpu_types::{
+            d4s4, embedding::EmbeddingTableKind, hadamard_order::HADAMARD_TRANSFORM_BLOCK_SIZE,
+            quantization_method::QuantizationMethod,
+        },
         kernel::InputEmbeddingLookupKernel,
     },
     config::weight_matrix::{
@@ -144,6 +147,11 @@ impl<B: Backend> EmbeddingTable<B> {
         let group_size = quantization.map(|info| info.group_size);
         let mode = quantization.map(|info| info.mode);
         let method = quantization.map(|info| info.method);
+        if method == Some(QuantizationMethod::ScaleFp4E4M3) {
+            return Err(EmbeddingTableError::UnsupportedConfiguration(
+                "FP4 embeddings with FP8 scales (fold the scales to BF16)".into(),
+            ));
+        }
         let use_hadamard = output_hadamard_factors.is_some();
         let lookup = LookupKernel::<B>::new(context, data_type, table_kind, group_size, mode, method, use_hadamard)
             .map_err(EmbeddingTableError::BackendError)?;

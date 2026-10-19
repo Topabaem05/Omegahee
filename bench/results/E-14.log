@@ -1,0 +1,3 @@
+E-14-nvfp4-r4-wavefront L2 per_loop prompt_128.json: decode 84.37 [83.92, 84.97] tok/s, upper 90.1, efficiency 93.6%, prefill 786 tok/s
+E-14-nvfp4-r4-wavefront L2 per_loop prompt_2048.json: decode 75.86 [75.60, 76.18] tok/s, upper 90.1, efficiency 84.2%, prefill 1416 tok/s
+E-14-nvfp4-r4-sequential L2 per_loop prompt_2048.json: decode 61.68 [59.93, 61.76] tok/s, upper 90.1, efficiency 68.4%, prefill 1421 tok/s

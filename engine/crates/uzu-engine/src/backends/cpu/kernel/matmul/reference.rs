@@ -4,7 +4,7 @@ use crate::{
     backends::{
         common::{
             BufferRef,
-            kernel::matmul::{MatmulB, QuantParamsStrides, QuantizedCorrection},
+            kernel::matmul::{MatmulB, QuantParamsStrides},
         },
         cpu::{Cpu, buffer::CpuBufferExt, kernel::matmul::MatmulCpuError},
     },
@@ -29,6 +29,8 @@ pub(super) enum WeightData {
         signed_codes: bool,
         /// FP4 e2m1 codes: value = scale * e2m1(code).
         fp4: bool,
+        /// With FP4: the scales are FP8 E4M3 bytes, multiplied by these FP32 per-row scales.
+        fp4_row_scales: Option<SendPtr<u8>>,
     },
 }
 
@@ -73,7 +75,8 @@ impl WeightData {
                 bits: quantized.bits() as usize,
                 group_size: quantized.group_size as usize,
                 signed_codes: quantized.signed_codes,
-                fp4: matches!(quantized.correction, QuantizedCorrection::Fp4),
+                fp4: quantized.is_fp4(),
+                fp4_row_scales: quantized.row_scales().map(buffer_ptr),
             }),
         }
     }

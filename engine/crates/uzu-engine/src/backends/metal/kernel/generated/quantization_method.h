@@ -13,5 +13,6 @@ enum class QuantizationMethod : uint32_t {
   ScaleZeroPoint = 1,
   ScaleSymmetric = 2,
   ScaleFp4 = 3,
+  ScaleFp4E4M3 = 4,
 };
 } // namespace uzu::quantization_method

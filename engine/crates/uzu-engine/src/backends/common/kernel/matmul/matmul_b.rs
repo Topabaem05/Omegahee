@@ -45,6 +45,9 @@ pub enum QuantizedCorrection<T> {
     ZeroPoints(T),
     /// FP4 (e2m1) codes: value = scale * e2m1(code), no correction term.
     Fp4,
+    /// FP4 (e2m1) codes with FP8 E4M3 group scales (raw bytes in `scales`) and these FP32 per-row
+    /// scales: value = e4m3(scale) * row_scale * e2m1(code).
+    Fp4E4M3(T),
 }
 
 impl<T> QuantizedCorrection<T> {
@@ -54,20 +57,28 @@ impl<T> QuantizedCorrection<T> {
             Self::Biases(biases) => QuantizedCorrection::Biases(biases),
             Self::ZeroPoints(zero_points) => QuantizedCorrection::ZeroPoints(zero_points),
             Self::Fp4 => QuantizedCorrection::Fp4,
+            Self::Fp4E4M3(row_scales) => QuantizedCorrection::Fp4E4M3(row_scales),
+        }
+    }
+
+    pub fn row_scales(&self) -> Option<&T> {
+        match self {
+            Self::Fp4E4M3(row_scales) => Some(row_scales),
+            Self::Symmetric | Self::Biases(_) | Self::ZeroPoints(_) | Self::Fp4 => None,
         }
     }
 
     pub fn biases(&self) -> Option<&T> {
         match self {
             Self::Biases(biases) => Some(biases),
-            Self::Symmetric | Self::ZeroPoints(_) | Self::Fp4 => None,
+            Self::Symmetric | Self::ZeroPoints(_) | Self::Fp4 | Self::Fp4E4M3(_) => None,
         }
     }
 
     pub fn zero_points(&self) -> Option<&T> {
         match self {
             Self::ZeroPoints(zero_points) => Some(zero_points),
-            Self::Symmetric | Self::Biases(_) | Self::Fp4 => None,
+            Self::Symmetric | Self::Biases(_) | Self::Fp4 | Self::Fp4E4M3(_) => None,
         }
     }
 }
@@ -83,6 +94,7 @@ impl<TB: BufferRef> QuantizedB<TB> {
             QuantizedCorrection::Biases(_) => GemmBPrologueKind::ScaleBiasDequant,
             QuantizedCorrection::ZeroPoints(_) => GemmBPrologueKind::ScaleZeroPointDequant,
             QuantizedCorrection::Fp4 => GemmBPrologueKind::ScaleFp4Dequant,
+            QuantizedCorrection::Fp4E4M3(_) => GemmBPrologueKind::ScaleFp4E4M3Dequant,
         }
     }
 
@@ -92,6 +104,14 @@ impl<TB: BufferRef> QuantizedB<TB> {
 
     pub fn zero_points(&self) -> Option<TB> {
         self.correction.zero_points().copied()
+    }
+
+    pub fn row_scales(&self) -> Option<TB> {
+        self.correction.row_scales().copied()
+    }
+
+    pub fn is_fp4(&self) -> bool {
+        matches!(self.correction, QuantizedCorrection::Fp4 | QuantizedCorrection::Fp4E4M3(_))
     }
 
     pub fn zero_point_strides(&self) -> super::QuantParamsStrides {

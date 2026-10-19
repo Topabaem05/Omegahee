@@ -1,0 +1,12 @@
+nvfp4_fp8s               mean KL 0.0432  p95 0.1302  top-1 agree 0.9571  positions 2845
+paused 8805
+E-15-bf16scales-wavefront-a1 L2 per_loop prompt_2048.json: decode 74.37 [73.23, 74.53] tok/s, upper 86.1, efficiency 86.3%, prefill 1417 tok/s
+E-15-fp8scales-wavefront L2 per_loop prompt_128.json: decode 82.82 [82.62, 82.90] tok/s, upper 94.5, efficiency 87.7%, prefill 794 tok/s
+E-15-fp8scales-wavefront L2 per_loop prompt_2048.json: decode 75.47 [74.64, 75.67] tok/s, upper 94.5, efficiency 79.9%, prefill 1323 tok/s
+E-15-fp8scales-wavefront L2 per_loop prompt_16384.json: decode 56.97 [56.56, 57.42] tok/s, upper 94.5, efficiency 60.3%, prefill 1160 tok/s
+E-15-fp8scales-wavefront-b2 L2 per_loop prompt_2048.json: decode 75.56 [75.50, 75.58] tok/s, upper 94.5, efficiency 80.0%, prefill 1422 tok/s
+E-15-bf16scales-wavefront-a2 L2 per_loop prompt_2048.json: decode 74.33 [73.20, 74.46] tok/s, upper 86.1, efficiency 86.3%, prefill 1423 tok/s
+E-15-fp8scales-sequential L2 per_loop prompt_2048.json: decode 61.33 [61.28, 61.33] tok/s, upper 94.5, efficiency 64.9%, prefill 1422 tok/s
+E-15-bf16scales-sequential L2 per_loop prompt_2048.json: decode 60.85 [60.69, 60.89] tok/s, upper 86.1, efficiency 70.6%, prefill 1413 tok/s
+resumed
+E15_DONE

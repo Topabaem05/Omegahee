@@ -10,7 +10,10 @@ NVFP4 checkpoint too. Every transformer linear of the base is replaced, without 
 Fused base matrices take their rows from several checkpoint tensors (qkvg = q, k, v, g; up = up, gate),
 each with its own tensor scale, which the BF16 group scales keep.
 
-    python3 tools/nvfp4_to_omega.py --base <omega model> --nvfp4 <nvfp4 checkout> --out <dir>
+With `--fp8-scales` the block scales stay the checkpoint's E4M3 bytes (U8 [groups, rows], half the bytes
+of BF16) and `weights.row_scales` (F32 [rows]) holds each row's tensor scale, so the values are exact.
+
+    python3 tools/nvfp4_to_omega.py --base <omega model> --nvfp4 <nvfp4 checkout> --out <dir> [--fp8-scales]
 """
 
 from __future__ import annotations
@@ -49,19 +52,27 @@ def read_header(path: Path) -> tuple[dict, int]:
         return json.loads(file.read(size)), 8 + size
 
 
-def fp4_matrix(nvfp4: dict, layer: int, sources: list[str]) -> tuple[np.ndarray, np.ndarray]:
-    codes, scales = [], []
+def fp4_matrix(
+    nvfp4: dict, layer: int, sources: list[str], fp8_scales: bool
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Codes [rows, columns / 2] and scales [groups, rows]: BF16 folded, or E4M3 bytes plus F32 row scales."""
+    codes, scales, row_scales = [], [], []
     for source in sources:
         name = f"backbone.layers.{layer}.{source}.weight"
         packed = nvfp4[name][1]
-        block_scales = e4m3_to_float(nvfp4[name + "_scale"][1])
+        raw_scales = nvfp4[name + "_scale"][1].view(np.uint8)
         tensor_scale = np.float32(nvfp4[name + "_scale_2"][1])
-        if block_scales.shape != (packed.shape[0], packed.shape[1] * 2 // BLOCK):
-            raise SystemExit(f"{name}: scale shape {block_scales.shape} does not match codes {packed.shape}")
+        if raw_scales.shape != (packed.shape[0], packed.shape[1] * 2 // BLOCK):
+            raise SystemExit(f"{name}: scale shape {raw_scales.shape} does not match codes {packed.shape}")
         codes.append(packed)
-        scales.append(block_scales * tensor_scale)
-    rows_scales = np.concatenate(scales, axis=0)
-    return np.ascontiguousarray(np.concatenate(codes, axis=0)), np.ascontiguousarray(to_bf16_bits(rows_scales).T)
+        if fp8_scales:
+            scales.append(raw_scales)
+            row_scales.append(np.full(packed.shape[0], tensor_scale, np.float32))
+        else:
+            scales.append(to_bf16_bits(e4m3_to_float(raw_scales) * tensor_scale))
+    codes = np.ascontiguousarray(np.concatenate(codes, axis=0))
+    scales = np.ascontiguousarray(np.concatenate(scales, axis=0).T)
+    return codes, scales, np.concatenate(row_scales) if fp8_scales else None
 
 
 def main() -> int:
@@ -69,6 +80,7 @@ def main() -> int:
     ap.add_argument("--base", required=True, type=Path)
     ap.add_argument("--nvfp4", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--fp8-scales", action="store_true", help="keep E4M3 block scales and add F32 row scales")
     args = ap.parse_args()
 
     base_path = args.base / "model.safetensors"
@@ -81,13 +93,16 @@ def main() -> int:
     prefixes = sorted({match.group(0)[: -len("weights.")] for name in header if (match := LINEAR.match(name))})
     for prefix in prefixes:
         layer, kind = LINEAR.match(prefix + "weights.").groups()
-        codes, scales = fp4_matrix(nvfp4, int(layer), SOURCES[kind])
+        codes, scales, row_scales = fp4_matrix(nvfp4, int(layer), SOURCES[kind], args.fp8_scales)
         old_codes = header[prefix + "weights.weights"]["shape"]
         rows = old_codes[0]
         if codes.shape[0] != rows:
             raise SystemExit(f"{prefix}: {codes.shape[0]} FP4 rows, base has {rows}")
         replaced[prefix + "weights.weights"] = ("U8", list(codes.shape), codes.tobytes())
-        replaced[prefix + "weights.scales"] = ("BF16", list(scales.shape), scales.tobytes())
+        scale_dtype = "U8" if args.fp8_scales else "BF16"
+        replaced[prefix + "weights.scales"] = (scale_dtype, list(scales.shape), scales.tobytes())
+        if row_scales is not None:
+            replaced[prefix + "weights.row_scales"] = ("F32", list(row_scales.shape), row_scales.tobytes())
         metadata[prefix + "weights.spec"] = json.dumps(SPEC)
     dropped = {
         name for name in header for prefix in prefixes if name.startswith(prefix + "weights.") and name not in replaced
@@ -125,6 +140,7 @@ def main() -> int:
         "base": str(args.base),
         "base_conversion": base_conversion,
         "nvfp4": str(args.nvfp4),
+        "scales": "fp8_e4m3_with_f32_row_scales" if args.fp8_scales else "bf16_folded",
         "replaced_matrices": len(prefixes),
         "dropped_tensors": sorted(dropped)[:4] + (["..."] if len(dropped) > 4 else []),
         "output_sha256": digest.hexdigest(),

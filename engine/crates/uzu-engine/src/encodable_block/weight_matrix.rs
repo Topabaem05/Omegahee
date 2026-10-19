@@ -146,7 +146,19 @@ impl<B: Backend> WeightMatrix<B> {
             |name: &str, shape: [u32; 2], storage_type: DataType| -> Result<B::GlobalBuffer, WeightMatrixError<B>> {
                 Ok(tree.read_buffer(name, &shape, storage_type)?)
             };
-        let scales = load_plane("scales", params.scale_shape(), data_type)?;
+        // FP4 scales are BF16 with the tensor scale folded in, or FP8 E4M3 bytes next to FP32 row scales.
+        let info = match info.method {
+            QuantizationMethod::ScaleFp4 if tree.contains("row_scales") => QuantizationInfo {
+                method: QuantizationMethod::ScaleFp4E4M3,
+                ..info
+            },
+            _ => info,
+        };
+        let scales_data_type = match info.method {
+            QuantizationMethod::ScaleFp4E4M3 => DataType::U8,
+            _ => data_type,
+        };
+        let scales = load_plane("scales", params.scale_shape(), scales_data_type)?;
         let correction = match info.method {
             QuantizationMethod::ScaleBias => {
                 QuantizedCorrection::Biases(load_plane("biases", params.scale_shape(), data_type)?)
@@ -158,6 +170,9 @@ impl<B: Backend> WeightMatrix<B> {
             )?),
             QuantizationMethod::ScaleSymmetric => QuantizedCorrection::Symmetric,
             QuantizationMethod::ScaleFp4 => QuantizedCorrection::Fp4,
+            QuantizationMethod::ScaleFp4E4M3 => {
+                QuantizedCorrection::Fp4E4M3(tree.read_buffer("row_scales", &[rows], DataType::F32)?)
+            },
         };
 
         Ok(Self {

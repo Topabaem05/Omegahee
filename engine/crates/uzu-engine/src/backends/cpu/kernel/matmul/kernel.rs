@@ -2,7 +2,10 @@ use crate::{
     backends::{
         common::{
             Backend, BufferCpuAccessible, BufferMut, BufferRef, Kernels,
-            gpu_types::{quantization::QuantizationMode, quantization_method::FP4_E2M1_VALUES},
+            gpu_types::{
+                quantization::QuantizationMode,
+                quantization_method::{FP4_E2M1_VALUES, fp8_e4m3_to_f32},
+            },
             kernel::{
                 ActivationTransform, TensorAddBiasKernel,
                 matmul::{Int8CodeLayout, MatmulA, MatmulArguments, MatmulKernel},
@@ -221,6 +224,7 @@ impl MatmulKernel for MatmulCpuKernel {
                                     group_size,
                                     signed_codes,
                                     fp4,
+                                    fp4_row_scales,
                                 } => {
                                     let pack_factor = 32 / *bits;
                                     let weight_linear_index = b_col * k_u + inner;
@@ -238,7 +242,13 @@ impl MatmulKernel for MatmulCpuKernel {
                                     let group_index = inner / group_size;
                                     let metadata_index = b_col * scale_strides.output_stride as usize
                                         + group_index * scale_strides.group_stride as usize;
-                                    let scale = read_f32(scales.as_ptr(), weights_data_type, metadata_index);
+                                    let scale = match fp4_row_scales {
+                                        Some(row_scales) => {
+                                            fp8_e4m3_to_f32(*scales.as_ptr().add(metadata_index))
+                                                * *(row_scales.as_ptr() as *const f32).add(b_col)
+                                        },
+                                        None => read_f32(scales.as_ptr(), weights_data_type, metadata_index),
+                                    };
                                     if *fp4 {
                                         scale * FP4_E2M1_VALUES[usize::from(weight_code)]
                                     } else {

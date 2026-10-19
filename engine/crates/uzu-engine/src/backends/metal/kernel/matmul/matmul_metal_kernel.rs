@@ -40,8 +40,8 @@ pub struct MatmulMetalKernel {
     gemv: GemvKernel,
     pub gemm: GemmKernel,
     output_work: MatmulOutputWork,
-    /// Expands FP4 weights to dense rows for GEMM (prefill); GEMM has no FP4 prologue.
-    fp4_dequantize: Option<Fp4DequantizeMetalKernel>,
+    /// Expands FP4 weights to dense rows for GEMM (prefill); GEMM has no FP4 prologue. Index: FP8 scales.
+    fp4_dequantize: [Option<Fp4DequantizeMetalKernel>; 2],
     weights_data_type: DataType,
     input_data_type: DataType,
     output_data_type: DataType,
@@ -188,7 +188,7 @@ impl MatmulKernel for MatmulMetalKernel {
             gemv,
             gemm,
             output_work,
-            fp4_dequantize: None,
+            fp4_dequantize: [None, None],
             weights_data_type,
             input_data_type,
             output_data_type,
@@ -291,7 +291,7 @@ impl MatmulKernel for MatmulMetalKernel {
         };
 
         if let MatmulB::Quantized(quantized) = &arguments.b
-            && quantized.prologue() == GemmBPrologueKind::ScaleFp4Dequant
+            && quantized.is_fp4()
         {
             return self.encode_fp4_gemm(arguments, command_buffer);
         }
@@ -332,10 +332,12 @@ impl MatmulMetalKernel {
                 path: "Fp4Gemm",
             });
         }
-        let kernel = match &mut self.fp4_dequantize {
+        let row_scales = quantized.row_scales();
+        let fp8_scales = row_scales.is_some();
+        let kernel = match &mut self.fp4_dequantize[fp8_scales as usize] {
             Some(kernel) => kernel,
             slot @ None => slot.insert(
-                Fp4DequantizeMetalKernel::new(command_buffer.context(), self.weights_data_type)
+                Fp4DequantizeMetalKernel::new(command_buffer.context(), self.weights_data_type, fp8_scales)
                     .map_err(MatmulMetalError::BackendError)?,
             ),
         };
@@ -346,6 +348,7 @@ impl MatmulMetalKernel {
         kernel.encode(
             quantized.codes,
             quantized.scales,
+            row_scales,
             &mut dense,
             n,
             k / 2,

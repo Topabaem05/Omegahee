@@ -108,6 +108,7 @@ pub fn input_embedding_lookup<T: DataTypeRepr + Float>(
                             -scale * midpoint
                         },
                         QuantizationMethod::ScaleFp4 => 0.0,
+                        QuantizationMethod::ScaleFp4E4M3 => panic!("FP8-scaled FP4 embeddings are not supported"),
                     };
                     let value = match quantization_method {
                         QuantizationMethod::ScaleFp4 => scale * FP4_E2M1_VALUES[code as usize],

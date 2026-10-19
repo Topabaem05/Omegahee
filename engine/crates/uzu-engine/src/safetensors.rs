@@ -152,6 +152,13 @@ impl<B: Backend> ParameterTree<'_, B> {
         })
     }
 
+    pub fn contains(
+        &self,
+        name: &str,
+    ) -> bool {
+        self.loader.header.tensors.contains_key(&format!("{}{name}", self.prefix))
+    }
+
     fn tensor(
         &self,
         name: &str,

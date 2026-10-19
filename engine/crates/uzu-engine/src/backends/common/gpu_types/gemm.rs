@@ -9,6 +9,7 @@ pub enum GemmBPrologueKind {
     ScaleZeroPointDequant,
     ScaleSymmetricDequant,
     ScaleFp4Dequant,
+    ScaleFp4E4M3Dequant,
 }
 
 bitflags! {

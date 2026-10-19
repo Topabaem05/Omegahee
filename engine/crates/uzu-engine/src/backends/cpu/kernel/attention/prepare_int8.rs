@@ -39,6 +39,7 @@ pub fn attention_prepare_int8<ElementT: DataTypeRepr + Float, RopeT: DataTypeRep
     #[specialize] num_kv_heads: u32,
     #[specialize] append_kv: bool,
 ) {
+    assert_eq!(query_scales.is_some(), has_query_scales, "attention prepare int8 query_scales presence mismatch");
     let head_dim = HEAD_DIM as usize;
     let rope_dim = if has_rope {
         rope_dim.unwrap() as usize

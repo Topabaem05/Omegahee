@@ -123,7 +123,7 @@ JSON으로 줍니다. 엔진 Metal GEMV(decode)가 지원하는 형식만 쓰십
 | `{"type": "MLXSpec", "bits": 8, ...}` | scale + bias 8비트 | 없음 | 쓰지 마십시오 |
 | `{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}` | 대칭 8비트 | 있음 | 8비트 readout |
 | group 128 | — | 없음(GEMV는 group 16(FP4), 32, 64만) | |
-| ModelOpt NVFP4 체크포인트(아래) | `MicrofloatSpec` FP4 e2m1, group 16, BF16 스케일 | 있음(batch 1, 2), prefill은 BF16 전개 | 보정된 공식 4비트 |
+| ModelOpt NVFP4 체크포인트(아래) | `MicrofloatSpec` FP4 e2m1, group 16, FP8 E4M3 스케일 + FP32 행 스케일(`--fp8-scales`) 또는 BF16 스케일 | 있음(batch 1, 2), prefill은 BF16 전개 | 보정된 공식 4비트, Dory 품질 98.4% |
 
 예(Dory INT4, readout INT4):
 
@@ -153,8 +153,12 @@ python3 tools/nvfp4_dequant.py --nvfp4 $M/<NVFP4 checkout> --config-from $M/<BF1
 cd converter && uv run python ../tools/omega_convert.py --spec <spec> --checkout /tmp/nvfp4-checkout --out /tmp/nvfp4-base \
     --encoding '<preset>' --linear-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}' \
     --readout-spec '{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}' && cd ..
-python3 tools/nvfp4_to_omega.py --base /tmp/nvfp4-base --nvfp4 $M/<NVFP4 checkout> --out $M/<name>-nvfp4
+python3 tools/nvfp4_to_omega.py --base /tmp/nvfp4-base --nvfp4 $M/<NVFP4 checkout> --out $M/<name>-nvfp4 --fp8-scales
 ```
+
+`--fp8-scales`는 체크포인트의 E4M3 블록 스케일 바이트를 그대로 두고(U8 [그룹, 행]) 행마다 FP32 텐서 스케일
+(`weights.row_scales`, F32 [행])을 따로 씁니다. 값이 체크포인트와 정확히 같고, BF16 스케일보다 선형층 바이트가 약
+10% 적어 Dory wavefront decode가 4.4% 빠릅니다. 이 옵션이 없으면 두 스케일을 곱해 BF16 [그룹, 행]으로 접습니다.
 
 `nvfp4_to_omega.py`의 `SOURCES` 표는 Dory의 융합 순서(qkvg = q, k, v, g; up = up, gate)입니다. 다른 모델은 lalamo
 로더의 `sublayers_to_fuse` 순서를 보고 표를 맞춥니다.

@@ -1,0 +1,6 @@
+paused 26300
+E-17-fp8scales-wavefront-int8kv L2 per_loop prompt_2048.json: decode 77.37 [77.37, 77.43] tok/s, upper 94.5, efficiency 81.9%, prefill 1432 tok/s
+E-17-fp8scales-wavefront-int8kv L2 per_loop prompt_16384.json: decode 66.27 [65.50, 66.28] tok/s, upper 94.5, efficiency 70.1%, prefill 1242 tok/s
+E-17-fp8scales-wavefront-bf16kv L2 per_loop prompt_16384.json: decode 59.16 [58.41, 59.25] tok/s, upper 94.5, efficiency 62.6%, prefill 1167 tok/s
+resumed
+E17_DONE

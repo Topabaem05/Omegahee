@@ -1,0 +1,11 @@
+paused 26300
+E-16-bf16scales-wavefront-a1 L2 per_loop prompt_2048.json: decode 74.40 [74.35, 74.49] tok/s, upper 86.1, efficiency 86.4%, prefill 1427 tok/s
+E-16-fp8scales-wavefront L2 per_loop prompt_128.json: decode 86.34 [86.31, 86.37] tok/s, upper 94.5, efficiency 91.4%, prefill 818 tok/s
+E-16-fp8scales-wavefront L2 per_loop prompt_2048.json: decode 77.69 [77.68, 77.76] tok/s, upper 94.5, efficiency 82.2%, prefill 1353 tok/s
+E-16-fp8scales-wavefront L2 per_loop prompt_16384.json: decode 59.24 [58.36, 59.29] tok/s, upper 94.5, efficiency 62.7%, prefill 1162 tok/s
+E-16-fp8scales-wavefront-b2 L2 per_loop prompt_2048.json: decode 77.71 [77.67, 77.74] tok/s, upper 94.5, efficiency 82.3%, prefill 1427 tok/s
+E-16-bf16scales-wavefront-a2 L2 per_loop prompt_2048.json: decode 74.50 [74.41, 74.54] tok/s, upper 86.1, efficiency 86.5%, prefill 1427 tok/s
+E-16-fp8scales-sequential L2 per_loop prompt_2048.json: decode 62.53 [62.44, 62.63] tok/s, upper 94.5, efficiency 66.2%, prefill 1415 tok/s
+E-16-bf16scales-sequential L2 per_loop prompt_2048.json: decode 60.96 [60.89, 60.97] tok/s, upper 86.1, efficiency 70.8%, prefill 1415 tok/s
+resumed
+E16_DONE

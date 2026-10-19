@@ -36,7 +36,8 @@ VARIANTS(
     GemmBPrologueKind::ScaleBiasDequant,
     GemmBPrologueKind::ScaleZeroPointDequant,
     GemmBPrologueKind::ScaleSymmetricDequant,
-    GemmBPrologueKind::ScaleFp4Dequant)
+    GemmBPrologueKind::ScaleFp4Dequant,
+    GemmBPrologueKind::ScaleFp4E4M3Dequant)
 VARIANTS(GROUP_SIZE, 0, 16, 32, 64)
 VARIANTS(BITS, 0, 4, 8)
 VARIANTS(K_SPLIT, 1, 2, 4, 8)
@@ -54,8 +55,11 @@ CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleZeroPointDequant || BITS == 4)
 CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleSymmetricDequant || BITS == 8)
 CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleBiasDequant || BITS == 4)
 CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleFp4Dequant || BITS == 4)
+CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleFp4E4M3Dequant || (BITS == 4 && GROUP_SIZE == 16))
 // Group 16 exists only for FP4 (NVFP4 blocks).
-CONSTRAINT(GROUP_SIZE != 16 || B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant)
+CONSTRAINT(
+    GROUP_SIZE != 16 || B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant ||
+    B_PROLOGUE == GemmBPrologueKind::ScaleFp4E4M3Dequant)
 CONSTRAINT(BITS == 0 || K_SPLIT == 1)
 CONSTRAINT(BITS != 0 || (INPUT_ROW_TILE == 1 && REDUCTION_LANES == 32 && NUM_SIMDGROUPS == 8 && GROUP_LANES == 1))
 CONSTRAINT(INPUT_ROW_TILE != 1 || REDUCTION_LANES == 32)
@@ -70,10 +74,12 @@ CONSTRAINT(
 CONSTRAINT(
     INPUT_ROW_TILE == 1 ||
     (GROUP_SIZE == 64 && B_PROLOGUE != GemmBPrologueKind::ScaleFp4Dequant &&
+     B_PROLOGUE != GemmBPrologueKind::ScaleFp4E4M3Dequant &&
      ((GEMV_TILE(16, 8, 2) && INPUT_ROWS(2, 7)) ||
       (BITS == 4 && GEMV_TILE(16, 16, 4) && INPUT_ROWS(3, 6)) ||
       (BITS == 4 && GEMV_TILE(8, 8, 2) && INPUT_ROW_TILE == 2))) ||
-    (B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant && GROUP_SIZE == 16 && INPUT_ROW_TILE == 2 &&
+    ((B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant || B_PROLOGUE == GemmBPrologueKind::ScaleFp4E4M3Dequant) &&
+     GROUP_SIZE == 16 && INPUT_ROW_TILE == 2 &&
      (GEMV_TILE(16, 8, 2) || GEMV_TILE(32, 32, 8))))
 
 // Keep only selector-reachable geometry families.
@@ -116,6 +122,9 @@ KERNEL(Gemv)(
         OPTIONAL(B_PROLOGUE == GemmBPrologueKind::ScaleZeroPointDequant),
     const device BT* biases
         OPTIONAL(B_PROLOGUE == GemmBPrologueKind::ScaleBiasDequant),
+    // FP8-scaled FP4: `scales` holds E4M3 bytes; these are the FP32 per-row scales.
+    const device float* row_scales
+        OPTIONAL(B_PROLOGUE == GemmBPrologueKind::ScaleFp4E4M3Dequant),
     const device AT* a,
     device DT* d,
     const device BT* output_bias
@@ -146,7 +155,7 @@ KERNEL(Gemv)(
     const uint simd_group THREADS(NUM_SIMDGROUPS)
 ) {
   using Ops = GemvOperands<AT, BT, DT>;
-  const Ops ops = {b, scales, zero_points, biases, a, d, output_bias, hadamard_factors, gather_indices};
+  const Ops ops = {b, scales, zero_points, biases, a, d, output_bias, hadamard_factors, gather_indices, row_scales};
   const GemvParams params = {
       in_vec_size,
       out_vec_size,
