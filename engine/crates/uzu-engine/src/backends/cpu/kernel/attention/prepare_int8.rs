@@ -26,6 +26,7 @@ pub fn attention_prepare_int8<ElementT: DataTypeRepr + Float, RopeT: DataTypeRep
     #[optional(append_kv)] v_scales: Option<*mut ElementT>,
     #[optional(has_rope)] cosines: Option<*const RopeT>,
     #[optional(has_rope)] sines: Option<*const RopeT>,
+    #[optional(has_query_scales)] query_scales: Option<*const f32>,
     num_q_heads: u32,
     #[optional(has_rope)] rope_dim: Option<u32>,
     kv_token_offset: u32,
@@ -33,6 +34,7 @@ pub fn attention_prepare_int8<ElementT: DataTypeRepr + Float, RopeT: DataTypeRep
     suffix_length: u32,
     query_rows: u32,
     #[specialize] has_rope: bool,
+    #[specialize] has_query_scales: bool,
     #[specialize] quantize_queries: bool,
     #[specialize] num_kv_heads: u32,
     #[specialize] append_kv: bool,
@@ -66,6 +68,14 @@ pub fn attention_prepare_int8<ElementT: DataTypeRepr + Float, RopeT: DataTypeRep
                     apply_rope(source, cosines.unwrap(), sines.unwrap(), token as usize, channel, rope_dim)
                 } else {
                     unsafe { *source.add(channel) }
+                };
+                // Query scales apply after RoPE, rounded to the element type like the BF16 prepare.
+                let element = match query_scales.filter(|_| is_query) {
+                    Some(scales) => ElementT::from(
+                        element.to_f32().unwrap() * unsafe { *scales.add(head as usize * head_dim + channel) },
+                    )
+                    .unwrap(),
+                    None => element,
                 }
                 .to_f32()
                 .unwrap();

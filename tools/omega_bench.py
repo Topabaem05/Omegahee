@@ -132,9 +132,9 @@ def model_hash(model: Path) -> str:
     return digest.hexdigest()
 
 
-def run_requests(model_dir: Path, requests: list[Path], runs: int) -> list[list[dict]]:
+def run_requests(model_dir: Path, requests: list[Path], runs: int, binary: Path = BENCH_BINARY) -> list[list[dict]]:
     process = subprocess.Popen(
-        [str(BENCH_BINARY), "-m", str(model_dir)],
+        [str(binary), "-m", str(model_dir)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -179,6 +179,7 @@ def main() -> int:
     ap.add_argument("--bandwidth-gbs", type=float, default=307.0, help="peak memory bandwidth for the upper bound")
     ap.add_argument("--cooldown-timeout", type=float, default=900.0)
     ap.add_argument("--out", type=Path, default=ROOT / "bench/results/research_runs.jsonl")
+    ap.add_argument("--binary", type=Path, default=BENCH_BINARY, help="benchmarks-uzu binary (another build to compare)")
     args = ap.parse_args()
 
     model = args.model.expanduser().resolve()
@@ -193,7 +194,7 @@ def main() -> int:
             )
             upper_bound = args.bandwidth_gbs * 1e9 / bytes_per_token
             cpu, gpu = wait_cooldown(args.cooldown_timeout)
-            results = run_requests(variant, args.requests, args.runs)
+            results = run_requests(variant, args.requests, args.runs, args.binary)
             for request_path, responses in zip(args.requests, results, strict=True):
                 summary = summarize(responses)
                 row = info | {

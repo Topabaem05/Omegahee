@@ -143,7 +143,10 @@ struct Int8Output {
     scales: [Vec<bf16>; 3],
 }
 
-fn run_int8<B: Backend>(num_q_heads: u32) -> Int8Output {
+fn run_int8<B: Backend>(
+    num_q_heads: u32,
+    with_query_scales: bool,
+) -> Int8Output {
     const DIM: usize = 256;
     const CACHE_TOKENS: usize = 64;
     let code_bytes = CACHE_TOKENS * DIM;
@@ -156,12 +159,19 @@ fn run_int8<B: Backend>(num_q_heads: u32) -> Int8Output {
     let mut v_codes = create_buffer_with_data::<B, u8>(&context, &vec![0; code_bytes]);
     let mut k_scales = create_buffer_with_data::<B, bf16>(&context, &[bf16::ZERO; CACHE_TOKENS]);
     let mut v_scales = create_buffer_with_data::<B, bf16>(&context, &[bf16::ZERO; CACHE_TOKENS]);
+    let query_scales = create_buffer_with_data::<B, f32>(
+        &context,
+        &(0..DIM.max(num_q_heads as usize * DIM))
+            .map(|i| 0.5 + (i as f32 * 0.11).cos().abs() * 3.0)
+            .collect::<Vec<_>>(),
+    );
     let kernel = <B::Kernels as Kernels>::AttentionPrepareInt8Kernel::new(
         &context,
         DataType::BF16,
         DataType::F32,
         DIM as u32,
         false,
+        with_query_scales,
         true,
         1,
         true,
@@ -179,6 +189,7 @@ fn run_int8<B: Backend>(num_q_heads: u32) -> Int8Output {
         Some(&mut v_scales),
         None::<&B::GlobalBuffer>,
         None::<&B::GlobalBuffer>,
+        with_query_scales.then_some(&query_scales),
         num_q_heads,
         None,
         33,
@@ -197,10 +208,19 @@ fn run_int8<B: Backend>(num_q_heads: u32) -> Int8Output {
 
 #[uzu_test]
 fn test_attention_prepare_int8() {
-    for num_q_heads in [0, 1] {
-        let cpu = run_int8::<Cpu>(num_q_heads);
+    for (num_q_heads, with_query_scales) in [(0, false), (1, false), (1, true)] {
+        let cpu = run_int8::<Cpu>(num_q_heads, with_query_scales);
         for_each_non_cpu_backend!(|B| {
-            assert_eq!(cpu, run_int8::<B>(num_q_heads), "INT8 prepare mismatch on {}", std::any::type_name::<B>());
+            assert_eq!(
+                cpu,
+                run_int8::<B>(num_q_heads, with_query_scales),
+                "INT8 prepare mismatch on {} (query scales {with_query_scales})",
+                std::any::type_name::<B>()
+            );
         });
     }
+    // Query scales change the query codes and scales only.
+    let (plain, scaled) = (run_int8::<Cpu>(1, false), run_int8::<Cpu>(1, true));
+    assert_ne!((&plain.codes[0], &plain.scales[0]), (&scaled.codes[0], &scaled.scales[0]));
+    assert_eq!((&plain.codes[1..], &plain.scales[1..]), (&scaled.codes[1..], &scaled.scales[1..]));
 }

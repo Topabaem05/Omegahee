@@ -40,6 +40,7 @@
 | E-06 | 루프 wavefront decode(recurrent 층 batch 2, 1루프 조기 종료로 다음 토큰 추측), `OMEGA_WAVEFRONT=1` | recurrent 가중치와 고정 비용을 두 토큰이 공유 | BF16 24.70 / INT4 67.47 | BF16 30.96 [30.92, 30.97] / INT4 76.16 [75.56, 76.28] | `67e85fb`, (이 커밋) | 속도 채택(INT4 +12.9%, BF16 +25.3%), 근사 변경이라 품질 묶음 판정 후 기본값 결정 |
 | E-07 | wavefront 다음 단계를 추측이 맞다고 보고 미리 인코딩(맞으면 제출, 틀리면 버리고 KV 장부 복원) | 단계마다 드러나던 CPU 인코딩 시간 숨김 | BF16 30.96 / INT4 76.16 | BF16 31.33 [31.06, 31.38] / INT4 78.44 [77.33, 79.16] | (이 커밋) | 채택(출력 토큰 E-06과 동일, INT4 +3.0%) |
 | E-08 | MLX(ScaleBias) INT4 g64 m=2 GEMV에 입력 2행 타일(2 simdgroup, 출력 16행, lane 8) | batch 2가 가중치를 한 번만 읽음 | wavefront INT4 78.44 | wavefront INT4 82.27 [81.42, 82.35] (readout INT4: 83.78) | (이 커밋) | 채택(GEMV 정확도 동일, +4.9%) |
+| E-09 | query scale이 있는 attention의 INT8 KV(전체 attention 9층), `OMEGA_INT8_KV=1` | 16K에서 전체 attention KV 읽기 절반 | wavefront INT4 r4 2K 83.99 / 16K 63.13 | 2K 83.01 [82.08, 84.05] / 16K 69.78 [69.07, 71.45] | (이 커밋) | 16K +10.5%(16K/2K 75%→84%), parity 근사 오차 증가, 품질 묶음 판정 대기 |
 
 ### 기준선 전체 (E-00, 2루프 per_loop, 워밍업 제외 5회 중앙값 [최소, 최대])
 
@@ -290,3 +291,36 @@ zero-point 경로가 쓰는 타일 계열을 m=2에 썼습니다(`policy::scale_
 | INT4 순차(확인용) | 2,048 | 67.47(E-03) | 66.49 [65.82, 67.24] |
 
 순차 경로 값이 E-03보다 1.5% 낮습니다. m=1 경로 코드는 바뀌지 않았으므로 eval이 끝난 뒤 다시 잽니다.
+
+### E-09 INT8 KV(query scale 지원)
+
+uzu는 INT8 attention 커널이 지원하는 층(전체 attention, ring 없음, MXU)에서 INT8 KV를 기본으로 씁니다. Dory는 INT8
+prepare 커널이 query scale을 적용하지 못해 빠져 있었습니다. `AttentionPrepareInt8`(Metal, CPU)에 BF16 prepare와 같은
+위치(RoPE 뒤, 요소형으로 반올림)의 query scale을 넣었습니다. CPU와 Metal 출력이 비트 단위로 같습니다
+(`test_attention_prepare_int8`). INT8 경로는 query도 INT8로 양자화하므로 근사입니다.
+
+- parity(BF16 모델): 6개 중 5개 통과. "think"의 마지막 logits 차이가 0.634로 BF16 허용 오차(0.5)를 넘습니다(BF16 KV
+  0.484). 1,830토큰 프롬프트는 prefill margin 1824/1830(허용 6), decode top-1 log-prob 차이 0.39(BF16 KV 0.18).
+  결과 `bench/results/E-09-parity.json`.
+- 속도(INT4, readout INT4, wavefront): 2K 83.99 → 83.01(잡음 안), 16K 63.13 → 69.78(+10.5%). 연구 계획의 긴 문맥
+  목표(16K ≥ 2K의 80%)를 INT8 KV에서만 넘습니다(84%, BF16 KV 75%).
+- query scale이 있는 모델에서는 품질을 재기 전까지 `OMEGA_INT8_KV=1`일 때만 켭니다.
+
+### 순차 decode 회귀 확인
+
+E-08 측정에서 순차 INT4가 E-03보다 낮게 나와(66.49 대 67.47) E-03 커밋 binary와 현재 binary를 번갈아(ABBA) 쟀습니다.
+현재 67.30, E-03 66.83, E-03 66.49, 현재 65.72로 차이는 −0.2%이고, 순서에 따른 변동(먼저 잰 쪽이 빠름)이 더 큽니다.
+회귀는 없습니다. 같은 세션 안에서도 시간이 떨어진 측정 사이에는 2~3%의 변동이 있으므로, 그보다 작은 차이는 ABBA로
+판정합니다(`bench/results/E-09-abba.log`). `tools/omega_bench.py --binary`로 다른 빌드를 잴 수 있습니다.
+
+### 품질 묶음 BF16 기준선(추론 끔, greedy)
+
+| 과제 | 점수 |
+|---|---|
+| GSM8K 200 | 90.5% (181) |
+| HumanEval 164 | 84.8% (139) |
+| MMLU-Pro 500 | 43.6% (218) |
+| 16K 검색 20 | 95.0% (19) |
+| 묶음 점수 | 78.46% |
+
+연구 계획의 품질 조건: 1차 목표 ≥ 97%(76.11%), 확장 목표 ≥ 95%(74.54%).

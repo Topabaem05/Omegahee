@@ -41,6 +41,7 @@ PUBLIC KERNEL(AttentionPrepareInt8)(
     device ElementT* v_scales OPTIONAL(append_kv),
     const device RopeT* cosines OPTIONAL(has_rope),
     const device RopeT* sines OPTIONAL(has_rope),
+    const device float* query_scales OPTIONAL(has_query_scales), // [num_q_heads * head_dim], applied after RoPE
     const constant uint32_t& num_q_heads,
     const constant uint32_t& rope_dim OPTIONAL(has_rope),
     const constant uint32_t& kv_token_offset,
@@ -48,6 +49,7 @@ PUBLIC KERNEL(AttentionPrepareInt8)(
     const constant uint32_t& suffix_length,
     const constant uint32_t& query_rows,
     const bool has_rope SPECIALIZE,
+    const bool has_query_scales SPECIALIZE,
     const bool quantize_queries SPECIALIZE,
     const uint32_t num_kv_heads SPECIALIZE,
     const bool append_kv SPECIALIZE,
@@ -77,6 +79,9 @@ PUBLIC KERNEL(AttentionPrepareInt8)(
     ElementT element = head[channel];
     if (has_rope && (is_query || is_key) && channel < rope_dim) {
       element = apply_rope(head, cosines, sines, token_idx, channel, rope_dim);
+    }
+    if (has_query_scales && is_query) {
+      element = static_cast<ElementT>(static_cast<float>(element) * query_scales[head_idx * HEAD_DIM + channel]);
     }
     values[value_index] = float(element);
   }

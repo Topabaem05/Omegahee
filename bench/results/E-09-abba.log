@@ -1,0 +1,8 @@
+paused
+E-09-abba-current L2 per_loop prompt_2048.json: decode 67.30 [66.29, 67.41] tok/s, upper 94.7, efficiency 71.1%, prefill 1422 tok/s
+E-09-abba-e03 L2 per_loop prompt_2048.json: decode 66.83 [66.78, 67.06] tok/s, upper 94.7, efficiency 70.6%, prefill 1403 tok/s
+E-09-abba-e03 L2 per_loop prompt_2048.json: decode 66.49 [65.46, 66.86] tok/s, upper 94.7, efficiency 70.2%, prefill 1397 tok/s
+E-09-abba-current L2 per_loop prompt_2048.json: decode 65.72 [64.63, 66.26] tok/s, upper 94.7, efficiency 69.4%, prefill 1384 tok/s
+resumed
+
+[exited with code 0]

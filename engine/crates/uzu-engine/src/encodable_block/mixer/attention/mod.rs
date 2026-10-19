@@ -63,7 +63,7 @@ pub struct Attention<B: Backend> {
     /// One kernel for the gate scales, the sigmoid gate and a unit-L2 output norm (nGPT attention).
     /// When present, the attention kernel runs without its gate and `output_norm` is unused.
     fused_gate_norm: Option<FusedGateNorm<B>>,
-    /// INT8 KV is used only when the attention kernel supports it and the INT8 prepare path covers the config.
+    /// INT8 KV is used when the attention kernel supports it (opt-in with query scales).
     use_int8_kv: bool,
 }
 
@@ -238,7 +238,10 @@ impl<B: Backend> Attention<B> {
             },
         )
         .map_err(AttentionNewError::Kernel)?;
-        let use_int8_kv = kernel.supports_int8() && query_scales.is_none();
+        // INT8 KV quantizes the queries too; with query scales (nGPT) it is opt-in until its quality
+        // is measured (`OMEGA_INT8_KV=1`).
+        let use_int8_kv = kernel.supports_int8()
+            && (query_scales.is_none() || std::env::var_os("OMEGA_INT8_KV").is_some_and(|value| value != "0"));
         let prepare_int8 = use_int8_kv
             .then(|| {
                 <B::Kernels as Kernels>::AttentionPrepareInt8Kernel::new(
@@ -247,6 +250,7 @@ impl<B: Backend> Attention<B> {
                     DataType::F32,
                     head_dim,
                     rope_config.is_some(),
+                    query_scales.is_some(),
                     true,
                     num_groups,
                     !is_kv_sharing,

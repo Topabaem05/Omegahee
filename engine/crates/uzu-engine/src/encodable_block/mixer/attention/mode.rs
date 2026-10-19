@@ -405,6 +405,7 @@ impl<B: Backend> Attention<B> {
             v_scales,
             rope.map(|rope| &rope.cosines),
             rope.map(|rope| &rope.sines),
+            self.query_scales.as_ref(),
             num_q_heads,
             rope.map(|rope| rope.dim),
             kv_token_offset,

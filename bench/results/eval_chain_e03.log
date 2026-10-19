@@ -1,0 +1,5 @@
+bf16-e03 gsm8k: 181/200 = 90.5%
+bf16-e03 humaneval: 139/164 = 84.8%
+bf16-e03 mmlu_pro: 218/500 = 43.6%
+bf16-e03 long: 19/20 = 95.0%
+bf16-e03 suite score 78.46%

@@ -1,0 +1,6 @@
+E-09-check-e03-binary L2 per_loop prompt_2048.json: decode 64.04 [63.93, 64.19] tok/s, upper 94.7, efficiency 67.6%, prefill 1420 tok/s
+E-09-check-current-sequential L2 per_loop prompt_2048.json: decode 62.35 [61.53, 63.33] tok/s, upper 94.7, efficiency 65.9%, prefill 1386 tok/s
+E-09-wavefront-r4-bf16kv L2 per_loop prompt_2048.json: decode 83.99 [83.08, 84.76] tok/s, upper 99.5, efficiency 84.4%, prefill 1405 tok/s
+E-09-wavefront-r4-bf16kv L2 per_loop prompt_16384.json: decode 63.13 [62.50, 64.22] tok/s, upper 99.5, efficiency 63.5%, prefill 1124 tok/s
+E-09-wavefront-r4-int8kv L2 per_loop prompt_2048.json: decode 83.01 [82.08, 84.05] tok/s, upper 99.5, efficiency 83.4%, prefill 1414 tok/s
+E-09-wavefront-r4-int8kv L2 per_loop prompt_16384.json: decode 69.78 [69.07, 71.45] tok/s, upper 99.5, efficiency 70.1%, prefill 1246 tok/s
