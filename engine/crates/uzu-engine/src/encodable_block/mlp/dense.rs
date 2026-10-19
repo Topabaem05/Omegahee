@@ -4,8 +4,12 @@ use derive_more::Debug;
 use thiserror::Error;
 
 use crate::{
-    backends::common::{Backend, CommandBuffer, CommandBufferEncoding, Kernels, kernel::ScaleColumnsKernel},
-    config::{learned_scale::LearnedScaleConfig, mlp::dense_mlp::DenseMLPConfig},
+    backends::common::{
+        Backend, CommandBuffer, CommandBufferEncoding, Kernels,
+        gpu_types::activation_type::ActivationType,
+        kernel::{NgptSwiGLUNormKernel, ScaleColumnsKernel},
+    },
+    config::{clipping::ClippingBounds, learned_scale::LearnedScaleConfig, mlp::dense_mlp::DenseMLPConfig},
     data_type::DataType,
     encodable_block::{
         learned_scale::{create_f32_buffer, read_effective_scale},
@@ -21,9 +25,17 @@ pub struct DenseMlp<B: Backend> {
     gate: MlpGateActMulEncodable<B>,
     down: Box<dyn Linear<B>>,
     hidden_dimension: u32,
+    data_type: DataType,
     /// Effective per-channel scales of the fused [up, gate] projection output, applied in place.
     channel_scales: Option<(B::GlobalBuffer, <B::Kernels as Kernels>::ScaleColumnsKernel)>,
     hidden_norm: Option<Normalization<B>>,
+    /// One kernel for channel scales, SwiGLU and the unit-L2 hidden normalization (nGPT MLPs).
+    fused_hidden: Option<FusedHidden<B>>,
+}
+
+struct FusedHidden<B: Backend> {
+    kernel: <B::Kernels as Kernels>::NgptSwiGLUNormKernel,
+    epsilon: f32,
 }
 
 #[derive(Debug, Error)]
@@ -113,6 +125,27 @@ impl<B: Backend> DenseMlp<B> {
             None
         };
 
+        let fused_hidden = match &config.hidden_norm_config {
+            Some(norm_config)
+                if norm_config.is_unit_l2()
+                    && config.activation.act_type() == ActivationType::SILU
+                    && config.activation.custom_alpha().is_none()
+                    && config.gate_clipping == ClippingBounds::default()
+                    && config.up_clipping == ClippingBounds::default() =>
+            {
+                Some(FusedHidden {
+                    kernel: <B::Kernels as Kernels>::NgptSwiGLUNormKernel::new(
+                        context,
+                        data_type,
+                        channel_scales.is_some(),
+                    )
+                    .map_err(DenseMlpNewError::Backend)?,
+                    epsilon: norm_config.epsilon,
+                })
+            },
+            _ => None,
+        };
+
         let gate = MlpGateActMulEncodable::new(
             hidden_dimension,
             data_type,
@@ -130,8 +163,10 @@ impl<B: Backend> DenseMlp<B> {
                 gate,
                 down,
                 hidden_dimension,
+                data_type,
                 channel_scales,
                 hidden_norm,
+                fused_hidden,
             },
             up_input_hadamard_factors,
         ))
@@ -148,6 +183,21 @@ impl<B: Backend> Mlp<B> for DenseMlp<B> {
         let command_buffer = &mut *command_buffer.debug_group("mlp (dense)");
 
         let mut fused_up = self.up.encode(input, batch_dim, command_buffer)?;
+        if let Some(fused_hidden) = &self.fused_hidden {
+            let mut hidden = command_buffer
+                .allocate_scratch_for_shape(&[batch_dim, self.hidden_dimension], self.data_type)
+                .map_err(MlpEncodeError::Backend)?;
+            fused_hidden.kernel.encode(
+                &fused_up,
+                self.channel_scales.as_ref().map(|(scales, _)| scales),
+                &mut hidden,
+                batch_dim,
+                self.hidden_dimension,
+                fused_hidden.epsilon,
+                command_buffer,
+            );
+            return Ok(self.down.encode_input(LinearInput::FullPrecision(hidden), batch_dim, command_buffer)?);
+        }
         if let Some((scales, scale_columns)) = &self.channel_scales {
             let fused_dimension = 2 * self.hidden_dimension;
             scale_columns.encode(&mut fused_up, scales, batch_dim, fused_dimension, fused_dimension, 0, command_buffer);

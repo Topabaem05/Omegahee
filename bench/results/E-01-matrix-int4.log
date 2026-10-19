@@ -1,0 +1,6 @@
+E-01-matrix L1 per_loop prompt_2048.json: decode 97.59 [96.91, 98.50] tok/s, upper 139.0, efficiency 70.2%, prefill 2081 tok/s
+E-01-matrix L1 last_loop prompt_2048.json: decode 97.03 [95.69, 97.68] tok/s, upper 139.0, efficiency 69.8%, prefill 2070 tok/s
+E-01-matrix L2 per_loop prompt_2048.json: decode 66.63 [66.50, 66.76] tok/s, upper 94.7, efficiency 70.4%, prefill 1355 tok/s
+E-01-matrix L2 last_loop prompt_2048.json: decode 65.48 [65.36, 65.59] tok/s, upper 94.7, efficiency 69.2%, prefill 1332 tok/s
+E-01-matrix L4 per_loop prompt_2048.json: decode 40.14 [38.50, 40.30] tok/s, upper 57.8, efficiency 69.5%, prefill 774 tok/s
+E-01-matrix L4 last_loop prompt_2048.json: decode 39.35 [39.18, 39.59] tok/s, upper 57.8, efficiency 68.1%, prefill 763 tok/s

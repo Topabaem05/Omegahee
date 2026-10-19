@@ -6,7 +6,7 @@ use crate::{
         Backend, CommandBuffer, CommandBufferEncoding, Kernels,
         kernel::{
             AttentionKernel, AttentionKernelConfig, AttentionPrepareInt8Kernel, AttentionPrepareKernel,
-            ScaleColumnsKernel,
+            NgptGateNormKernel, ScaleColumnsKernel,
         },
     },
     config::{rope::AnyRoPEConfig, token_mixer::attention::AttentionConfig},
@@ -59,8 +59,16 @@ pub struct Attention<B: Backend> {
     /// Effective per-channel gate logit scales and the kernel that applies them in place.
     gate_scales: Option<(B::GlobalBuffer, <B::Kernels as Kernels>::ScaleColumnsKernel)>,
     output_norm: Option<Normalization<B>>,
+    /// One kernel for the gate scales, the sigmoid gate and a unit-L2 output norm (nGPT attention).
+    /// When present, the attention kernel runs without its gate and `output_norm` is unused.
+    fused_gate_norm: Option<FusedGateNorm<B>>,
     /// INT8 KV is used only when the attention kernel supports it and the INT8 prepare path covers the config.
     use_int8_kv: bool,
+}
+
+struct FusedGateNorm<B: Backend> {
+    kernel: <B::Kernels as Kernels>::NgptGateNormKernel,
+    epsilon: f32,
 }
 
 #[derive(Debug, Error)]
@@ -187,6 +195,14 @@ impl<B: Backend> Attention<B> {
                 )
             })
             .transpose()?;
+        let fused_gate_norm = match &config.output_norm_config {
+            Some(norm_config) if norm_config.is_unit_l2() && gate_scales.is_some() => Some(FusedGateNorm {
+                kernel: <B::Kernels as Kernels>::NgptGateNormKernel::new(context, data_type)
+                    .map_err(AttentionNewError::Backend)?,
+                epsilon: norm_config.epsilon,
+            }),
+            _ => None,
+        };
 
         let prepare = <B::Kernels as Kernels>::AttentionPrepareKernel::new(
             context,
@@ -211,7 +227,8 @@ impl<B: Backend> Attention<B> {
                 num_groups,
                 num_q_heads,
                 has_sinks: sinks.is_some(),
-                gate_row_stride: config.has_gate.then_some(projection_dim),
+                // The fused gate norm applies the gate after the kernel instead.
+                gate_row_stride: (config.has_gate && fused_gate_norm.is_none()).then_some(projection_dim),
                 is_kv_cache_ring,
                 is_causal,
                 sliding_window_size,
@@ -269,6 +286,7 @@ impl<B: Backend> Attention<B> {
                 query_scales,
                 gate_scales,
                 output_norm,
+                fused_gate_norm,
                 use_int8_kv,
             },
             in_projection_input_hadamard_factors,

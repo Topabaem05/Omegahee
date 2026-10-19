@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::{
     backends::common::{Backend, Buffer, CommandBuffer, CommandBufferEncoding, Kernels, kernel::NgptResidualMixKernel},
     config::{
-        normalization::{NormReduction, NormalizationConfig},
+        normalization::NormalizationConfig,
         transformer_layer::{NGPTAttentionLayerConfig, NGPTMLPLayerConfig},
     },
     data_type::DataType,
@@ -68,9 +68,7 @@ fn residual_epsilon<B: Backend>(
     config: &NormalizationConfig,
     layer_index: u32,
 ) -> Result<f32, NgptLayerError<B>> {
-    let is_unit_l2 =
-        config.reduction == NormReduction::Sum && !config.has_scale && !config.has_biases && !config.subtract_mean;
-    if !is_unit_l2 {
+    if !config.is_unit_l2() {
         return Err(NgptLayerError::UnsupportedResidualNorm {
             layer_index,
         });

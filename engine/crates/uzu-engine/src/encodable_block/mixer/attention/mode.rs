@@ -3,7 +3,7 @@ use crate::{
         Backend, Buffer, BufferMut, BufferRef, CommandBuffer, CommandBufferEncoding,
         kernel::{
             AttentionArguments, AttentionInput, AttentionKernel, AttentionPrepareInt8Kernel, AttentionPrepareKernel,
-            FullPrecisionInput, Int8Input, ScaleColumnsKernel,
+            FullPrecisionInput, Int8Input, NgptGateNormKernel, ScaleColumnsKernel,
         },
     },
     data_type::DataType,
@@ -60,8 +60,9 @@ impl<B: Backend> Attention<B> {
         command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
     ) -> Result<B::ScratchBuffer, AttentionEncodeError<B>> {
         let mut qkvg = self.projection.project(hidden, batch_dim.size(), command_buffer)?;
-        if let Some((gate_scales, scale_columns)) = &self.gate_scales {
-            let q_dim = self.num_q_heads * self.head_dim;
+        let q_dim = self.num_q_heads * self.head_dim;
+        let gate_offset = (self.projection_dim - q_dim) as usize * self.data_type.size_in_bytes();
+        if let (Some((gate_scales, scale_columns)), None) = (&self.gate_scales, &self.fused_gate_norm) {
             scale_columns.encode(
                 &mut qkvg,
                 gate_scales,
@@ -72,11 +73,7 @@ impl<B: Backend> Attention<B> {
                 command_buffer,
             );
         }
-        let gate = self.has_gate.then(|| {
-            qkvg.subrange(
-                (self.projection_dim - self.num_q_heads * self.head_dim) as usize * self.data_type.size_in_bytes()..,
-            )
-        });
+        let gate = (self.has_gate && self.fused_gate_norm.is_none()).then(|| qkvg.subrange(gate_offset..));
 
         let attention_output = {
             let (mut keys, mut values);
@@ -187,11 +184,28 @@ impl<B: Backend> Attention<B> {
                 .map_err(AttentionEncodeError::Kernel)?
         };
 
-        let attention_output = match &self.output_norm {
-            Some(output_norm) => output_norm
+        let attention_output = match (&self.fused_gate_norm, &self.output_norm) {
+            (Some(fused), _) => {
+                let (gate_scales, _) = self.gate_scales.as_ref().expect("fused gate norm requires gate scales");
+                let mut output =
+                    command_buffer.allocate_scratch(attention_output.size()).map_err(AttentionEncodeError::Backend)?;
+                fused.kernel.encode(
+                    &attention_output,
+                    qkvg.subrange(gate_offset..),
+                    gate_scales,
+                    &mut output,
+                    batch_dim.size(),
+                    q_dim,
+                    self.projection_dim,
+                    fused.epsilon,
+                    command_buffer,
+                );
+                output
+            },
+            (None, Some(output_norm)) => output_norm
                 .encode(&attention_output, 0, batch_dim.size(), None::<&mut B::ScratchBuffer>, command_buffer)
                 .map_err(AttentionEncodeError::Backend)?,
-            None => attention_output,
+            (None, None) => attention_output,
         };
 
         Ok(self.out_projection.encode(attention_output, batch_dim.size(), command_buffer)?)

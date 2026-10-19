@@ -24,3 +24,10 @@ pub struct NormalizationConfig {
     pub has_biases: bool,
     pub reduction: NormReduction,
 }
+
+impl NormalizationConfig {
+    /// `x * rsqrt(sum(x^2) + epsilon)`: a sum-reduction norm without scale, biases or mean subtraction.
+    pub fn is_unit_l2(&self) -> bool {
+        self.reduction == NormReduction::Sum && !self.has_scale && !self.has_biases && !self.subtract_mean
+    }
+}

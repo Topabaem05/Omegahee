@@ -7,8 +7,10 @@ use uzu_engine_macros::uzu_test;
 
 use crate::{
     backends::common::{
-        Backend, CommandBufferEncoding, CommandBufferExecutable, CommandBufferPending, Context, Kernels,
-        kernel::{NgptResidualMixKernel, NormalizationKernel, ScaleColumnsKernel},
+        Backend, BufferRef, CommandBufferEncoding, CommandBufferExecutable, CommandBufferPending, Context, Kernels,
+        kernel::{
+            NgptGateNormKernel, NgptResidualMixKernel, NgptSwiGLUNormKernel, NormalizationKernel, ScaleColumnsKernel,
+        },
     },
     data_type::{DataType, DataTypeRepr},
     tests::{
@@ -224,4 +226,134 @@ fn test_normalization_sum_reduction_is_unit_l2() {
             &format!("L2 normalization on {}", std::any::type_name::<B>()),
         );
     });
+}
+
+fn sigmoid(value: f32) -> f32 {
+    1.0 / (1.0 + (-value).exp())
+}
+
+fn test_swiglu_norm<T: DataTypeRepr + Float + Debug + Display>(has_scales: bool) {
+    let (batch_size, hidden_dim) = (2u32, 2200u32);
+    let hidden = hidden_dim as usize;
+    let fused_up =
+        values(batch_size as usize * 2 * hidden, 0.9).into_iter().map(|x| T::from(x).unwrap()).collect::<Vec<_>>();
+    let scales = values(2 * hidden, 3.1).into_iter().map(|x| x.abs() + 0.5).collect::<Vec<_>>();
+    let expected = fused_up
+        .chunks(2 * hidden)
+        .flat_map(|row| {
+            let scaled = |index: usize| {
+                let value = row[index].to_f32().unwrap();
+                if has_scales {
+                    round::<T>(value * scales[index])
+                } else {
+                    value
+                }
+            };
+            let activated =
+                (0..hidden).map(|i| round::<T>(scaled(i) * scaled(hidden + i) * sigmoid(scaled(hidden + i))));
+            unit_l2(&activated.collect::<Vec<_>>()).into_iter().map(|x| T::from(x).unwrap())
+        })
+        .collect::<Vec<_>>();
+    for_each_backend!(|B| {
+        let context = block_on(<B as Backend>::Context::new()).expect("Failed to create Context");
+        let kernel =
+            <<B as Backend>::Kernels as Kernels>::NgptSwiGLUNormKernel::new(&context, T::data_type(), has_scales)
+                .expect("Failed to create NgptSwiGLUNormKernel");
+        let input = create_buffer_with_data::<B, T>(&context, &fused_up);
+        let scales_buffer = create_buffer_with_data::<B, f32>(&context, &scales);
+        let mut output = create_buffer::<B, T>(&context, batch_size as usize * hidden);
+        let mut command_buffer = context.create_command_buffer(None, None).expect("Failed to create command buffer");
+        kernel.encode(
+            &input,
+            has_scales.then_some(&scales_buffer),
+            &mut output,
+            batch_size,
+            hidden_dim,
+            EPSILON,
+            &mut command_buffer,
+        );
+        block_on(command_buffer.end_encoding().submit().wait_until_completed()).expect("Failed to wait command buffer");
+        assert_eq_float::<T>(
+            &expected,
+            &buffer_to_vec::<B, T>(&output),
+            tolerance::<T>(),
+            &format!("NgptSwiGLUNorm (scales {has_scales}) on {}", std::any::type_name::<B>()),
+        );
+    });
+}
+
+#[uzu_test]
+fn test_swiglu_norm_f32() {
+    test_swiglu_norm::<f32>(true);
+    test_swiglu_norm::<f32>(false);
+}
+
+#[uzu_test]
+fn test_swiglu_norm_bf16() {
+    test_swiglu_norm::<bf16>(true);
+    test_swiglu_norm::<bf16>(false);
+}
+
+fn test_gate_norm<T: DataTypeRepr + Float + Debug + Display>() {
+    let (batch_size, dim, gate_offset, gate_row_stride) = (3u32, 1280u32, 7u32, 1300u32);
+    let dim_usize = dim as usize;
+    let attention =
+        values(batch_size as usize * dim_usize, 0.4).into_iter().map(|x| T::from(x).unwrap()).collect::<Vec<_>>();
+    // The gate lives at an offset inside a wider row, as in the fused qkvg projection.
+    let gate_rows = values(batch_size as usize * gate_row_stride as usize + gate_offset as usize, 1.3)
+        .into_iter()
+        .map(|x| T::from(x * 3.0).unwrap())
+        .collect::<Vec<_>>();
+    let gate_scales = values(dim_usize, 2.2).into_iter().map(|x| x.abs() + 0.2).collect::<Vec<_>>();
+    let expected = (0..batch_size as usize)
+        .flat_map(|row| {
+            let gated = (0..dim_usize)
+                .map(|i| {
+                    let gate = gate_rows[gate_offset as usize + row * gate_row_stride as usize + i].to_f32().unwrap();
+                    let scaled_gate = round::<T>(gate * gate_scales[i]);
+                    round::<T>(attention[row * dim_usize + i].to_f32().unwrap() * sigmoid(scaled_gate))
+                })
+                .collect::<Vec<_>>();
+            unit_l2(&gated).into_iter().map(|x| T::from(x).unwrap())
+        })
+        .collect::<Vec<_>>();
+    for_each_backend!(|B| {
+        let context = block_on(<B as Backend>::Context::new()).expect("Failed to create Context");
+        let kernel = <<B as Backend>::Kernels as Kernels>::NgptGateNormKernel::new(&context, T::data_type())
+            .expect("Failed to create NgptGateNormKernel");
+        let attention_buffer = create_buffer_with_data::<B, T>(&context, &attention);
+        let gate_buffer = create_buffer_with_data::<B, T>(&context, &gate_rows);
+        let gate = gate_buffer.subrange(gate_offset as usize * T::data_type().size_in_bytes()..);
+        let scales_buffer = create_buffer_with_data::<B, f32>(&context, &gate_scales);
+        let mut output = create_buffer::<B, T>(&context, attention.len());
+        let mut command_buffer = context.create_command_buffer(None, None).expect("Failed to create command buffer");
+        kernel.encode(
+            &attention_buffer,
+            gate,
+            &scales_buffer,
+            &mut output,
+            batch_size,
+            dim,
+            gate_row_stride,
+            EPSILON,
+            &mut command_buffer,
+        );
+        block_on(command_buffer.end_encoding().submit().wait_until_completed()).expect("Failed to wait command buffer");
+        assert_eq_float::<T>(
+            &expected,
+            &buffer_to_vec::<B, T>(&output),
+            tolerance::<T>(),
+            &format!("NgptGateNorm on {}", std::any::type_name::<B>()),
+        );
+    });
+}
+
+#[uzu_test]
+fn test_gate_norm_f32() {
+    test_gate_norm::<f32>();
+}
+
+#[uzu_test]
+fn test_gate_norm_bf16() {
+    test_gate_norm::<bf16>();
 }
