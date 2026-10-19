@@ -34,6 +34,7 @@ mod mode;
 mod qkv_norm;
 mod state;
 
+pub(crate) use mode::AttentionRowGroup;
 pub use state::{ATTENTION_SUFFIX_CAPACITY, AttentionState, KVCacheView};
 
 pub mod rope;

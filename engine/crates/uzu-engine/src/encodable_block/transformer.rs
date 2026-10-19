@@ -1,7 +1,9 @@
 use std::range::Range;
 
+mod wavefront;
 use derive_more::Debug;
 use thiserror::Error;
+pub use wavefront::{WavefrontCarry, WavefrontSlots};
 
 use crate::{
     backends::common::{

@@ -12,7 +12,9 @@ use crate::{
         embedding::{Embedding, EmbeddingError},
         normalization::{Normalization, NormalizationNewError, PostLayerScalar, ShortcutMode},
         per_layer_embedding::{PerLayerEmbedding, PerLayerEmbeddingError},
-        transformer::{Transformer, TransformerEncodeError, TransformerNewError, TransformerState},
+        transformer::{
+            Transformer, TransformerEncodeError, TransformerNewError, TransformerState, WavefrontCarry, WavefrontSlots,
+        },
     },
     safetensors::ParameterTree,
 };
@@ -134,6 +136,55 @@ impl<B: Backend> Decoder<B> {
         context: &B::Context,
     ) -> Result<TransformerState<B>, B::Error> {
         self.transformer.create_empty_state(max_context_length, context)
+    }
+
+    pub fn wavefront_supported(&self) -> bool {
+        self.per_layer_embedding.is_none() && self.transformer.wavefront_supported()
+    }
+
+    pub fn wavefront_slots(&self) -> WavefrontSlots {
+        self.transformer.wavefront_slots()
+    }
+
+    pub fn create_wavefront_carry(
+        &self,
+        context: &B::Context,
+    ) -> Result<WavefrontCarry<B>, B::Error> {
+        self.transformer.create_wavefront_carry(context)
+    }
+
+    /// One loop-wavefront step (see `transformer::wavefront`): `token_id` enters at `position`, and
+    /// with `has_carried_row` the row carried in `carry` finishes. Returns logits for
+    /// `[carried row, new row]` or `[new row]`; the new row's logits are an early exit after one loop.
+    pub fn encode_wavefront(
+        &self,
+        token_id: impl BufferRef<Backend = B>,
+        carry: &mut WavefrontCarry<B>,
+        position: u32,
+        has_carried_row: bool,
+        state: &mut TransformerState<B>,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<B::ScratchBuffer, DecoderError<B>> {
+        assert!(self.per_layer_embedding.is_none(), "wavefront does not support per-layer embeddings");
+        let command_buffer = &mut *command_buffer.debug_group("decoder wavefront");
+        let embedded = self.embedding.encode_lookup(token_id, 1, command_buffer)?;
+        let embedded = match &self.embedding_norm {
+            Some(embedding_norm) => embedding_norm
+                .encode(&embedded, 0, 1, None::<&mut B::ScratchBuffer>, command_buffer)
+                .map_err(DecoderError::Backend)?,
+            None => embedded,
+        };
+        let hidden =
+            self.transformer.encode_wavefront(embedded, carry, position, has_carried_row, state, command_buffer)?;
+        let rows = 1 + has_carried_row as u32;
+        Ok(self.embedding.encode_readout(
+            &hidden,
+            rows,
+            self.embedding.vocab_size(),
+            None::<&B::ScratchBuffer>,
+            true,
+            command_buffer,
+        )?)
     }
 
     pub fn encode(

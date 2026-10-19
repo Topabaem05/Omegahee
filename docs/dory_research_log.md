@@ -37,6 +37,7 @@
 | E-03 | attention의 gate scale + sigmoid gate + 출력 L2 norm을 커널 하나로 합침 | 토큰당 dispatch 약 112개 제거 | BF16 24.63 / INT4 67.08 | BF16 24.70 [24.65, 24.80] / INT4 67.47 [67.17, 67.58] | (이 커밋) | E-02+E-03 묶음 채택(출력 비트 동일, INT4 +0.9%, 범위 겹치지 않음) |
 | E-04 | sliding window층 single-pass 대신 two-pass(임계 KV 1,024→256) | 16 threadgroup single-pass가 지연 병목 | INT4 67.47 | INT4 67.35 [66.77, 67.38] (128: 70.90) | (기록만) | 기각(개선 없음, 되돌림) |
 | E-05 | readout INT8 대칭 → INT4 MLX g64(변환만 변경) | readout 읽기 0.35GB→0.19GB | INT4 67.47 | 69.02 [68.39, 69.92] | (변환 설정) | 속도는 +2.3%, 품질 묶음 판정 대기 |
+| E-06 | 루프 wavefront decode(recurrent 층 batch 2, 1루프 조기 종료로 다음 토큰 추측) | recurrent 가중치와 고정 비용을 두 토큰이 공유 | 하네스 순차 INT4 63.31 / BF16 23.66 | 하네스 INT4 75.38 / BF16 30.99 (2K) | (이 커밋) | 엔진 API·검증 완료, stream 통합 후 benchmarks-uzu로 판정 |
 
 ### 기준선 전체 (E-00, 2루프 per_loop, 워밍업 제외 5회 중앙값 [최소, 최대])
 
@@ -171,3 +172,41 @@ BF16 2루프 greedy로 생성한 200토큰(4개 프롬프트, 추론 켬)을 tea
 종료 출력으로 추측)는 추측이 맞으면 단계당 1토큰, 틀리면 한 단계를 버립니다. 일치율 0.925면 단계당 약 0.93토큰입니다.
 측정한 batch 2 GEMV 비용(1.3배)과 ablation 값으로 추정하면 INT4 약 74~78 tok/s(+10~13%), BF16 약 31 tok/s(+26%)입니다.
 per_loop KV에서는 두 행이 서로 다른 루프의 KV를 쓰므로 attention만 행별로 따로 실행하면 순차 decode와 같은 계산입니다.
+
+### E-06 루프 wavefront (엔진 API와 하네스 단계)
+
+구현: `Transformer::encode_wavefront`(`encodable_block/transformer/wavefront.rs`), `Decoder::encode_wavefront`,
+attention 행 묶음(`Attention::attend_row_groups`, `NgptLayer::encode_row_groups`). 한 단계에서
+- 새 행(위치 p): 입력 층, 1번째 루프(1루프 KV), 출력 층(조기 종료 = 다음 토큰 추측)
+- 이월 행(위치 p-1): 2번째 루프(2루프 KV), 출력 층(최종 logits)
+을 실행합니다. recurrent 층의 GEMV, MLP, 잔차 mix는 batch 2로 한 번, attention은 행마다 자기 루프 KV로 따로
+실행합니다. KV는 suffix에 남기고, 이월 행 몫(2루프, 출력 층 index 0)은 바로 accept, 새 행 몫(입력 층, 1루프)은 다음
+단계에서 추측이 맞으면 accept합니다. ring KV(sliding window)는 accept 후 되돌릴 수 없으므로 이 지연 accept가
+필요합니다. 추측이 틀리면 그 위치를 최종 토큰으로 다시 실행합니다(이월 행 없는 단계, 토큰 0개).
+
+검증(`unit/session/dory_wavefront.rs`):
+- teacher-forced(참조 토큰을 추측으로 넣음): parity 6개 프롬프트(1,830토큰 포함) 모두 순차 decode와 같은 판정
+  통과(decode margin 31/31, 15/15, top-1 일치 수 동일). 순차 decode logits와 차이 maxabs 0.16~0.50, 평균 약 0.02,
+  argmax 100% 일치. 결과 `bench/results/E-06-wavefront-parity.json`.
+- greedy 자유 생성 256토큰(5개 프롬프트 × INT4/BF16): 10개 중 5개는 순차와 토큰이 완전히 같고, 나머지는 27~255번째
+  토큰에서 갈라집니다. batch 2 GEMV와 출력 층 suffix 2 attention의 부동소수점 순서 차이로 근소한 동점에서 갈리는
+  것으로 봅니다(teacher-forced 차이가 BF16 잡음 수준). 따라서 출력 불변 변경이 아니라 근사 변경으로 다루고 품질
+  묶음으로 판정합니다.
+
+하네스 속도(두 방법 모두 단계마다 CPU 동기화와 logits 읽기, eval 일시 정지 상태, `bench/results/E-06-wavefront-harness.json`):
+
+| 모델 | 프롬프트 | 순차 tok/s | wavefront tok/s | 개선 | 추측 일치율 |
+|---|---|---|---|---|---|
+| INT4 | bench 2K | 63.31 | 75.38 | +19.1% | 97.3% |
+| INT4 | 요약 128 | 68.51 | 78.50 | +14.6% | 91.0% |
+| INT4 | 코드 | 69.00 | 82.32 | +19.3% | 96.1% |
+| INT4 | 수학 | 67.71 | 81.73 | +20.7% | 96.5% |
+| INT4 | 한국어 | 68.45 | 77.88 | +13.8% | 89.8% |
+| BF16 | bench 2K | 23.66 | 30.99 | +31.0% | 97.3% |
+| BF16 | 요약 128 | 24.95 | 31.38 | +25.8% | 90.6% |
+| BF16 | 코드 | 24.98 | 32.59 | +30.5% | 95.3% |
+| BF16 | 수학 | 24.58 | 32.81 | +33.5% | 97.3% |
+| BF16 | 한국어 | 24.53 | 29.93 | +22.0% | 87.1% |
+
+하네스 순차 decode는 stream(이전 forward 출력으로 다음 forward를 미리 인코딩)보다 느립니다(INT4 2K 63.3 대 67.5).
+공식 수치는 stream에 넣은 뒤 `tools/omega_bench.py`로 잽니다.

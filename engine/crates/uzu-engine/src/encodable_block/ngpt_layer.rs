@@ -4,6 +4,8 @@
 //! Unlike [`TransformerLayer`](super::transformer_layer::TransformerLayer), the hidden state passed
 //! between nGPT layers is the full residual stream, so no shortcut buffer is involved.
 
+use std::any::Any;
+
 use derive_more::Debug;
 use thiserror::Error;
 
@@ -17,7 +19,10 @@ use crate::{
     encodable_block::{
         batch_topology::BatchTopology,
         learned_scale::load_learned_scale,
-        mixer::{Mixer, MixerEncodeError, MixerNewError, MixerState, attention::rope::PrecalculatedRoPE},
+        mixer::{
+            Mixer, MixerEncodeError, MixerNewError, MixerState,
+            attention::{Attention, AttentionRowGroup, rope::PrecalculatedRoPE},
+        },
         mlp::{Mlp, MlpBlockNewError, MlpEncodeError},
     },
     safetensors::{ParameterLoaderError, ParameterTree},
@@ -195,16 +200,7 @@ impl<B: Backend> NgptLayer<B> {
         command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
     ) -> Result<(B::ScratchBuffer, Option<B::ScratchBuffer>), NgptLayerError<B>> {
         let command_buffer = &mut *command_buffer.debug_group(&format!("ngpt layer {}", self.layer_index));
-
-        let sublayer_input = match input_copy {
-            Some(input_copy) => input_copy,
-            None => {
-                let mut copy = command_buffer.allocate_scratch(input.size()).map_err(NgptLayerError::Backend)?;
-                command_buffer.encode_copy(&input, &mut copy);
-                copy
-            },
-        };
-
+        let sublayer_input = Self::sublayer_input(&input, input_copy, command_buffer)?;
         let update = match &self.sublayer {
             NgptSublayer::Mixer(mixer) => {
                 mixer.encode(sublayer_input, precalculated_rope, batch_dim, state, command_buffer)?
@@ -214,7 +210,55 @@ impl<B: Backend> NgptLayer<B> {
                 mlp.encode(sublayer_input, batch_dim.size(), command_buffer)?
             },
         };
+        self.mix_residual(&input, &update, emit_copy, batch_dim.size(), command_buffer)
+    }
 
+    /// Like [`Self::encode`] for an attention layer whose consecutive row groups each read and append
+    /// their own KV state at their own positions (rows from different loops of a loop wavefront).
+    pub fn encode_row_groups(
+        &self,
+        input: B::ScratchBuffer,
+        input_copy: Option<B::ScratchBuffer>,
+        emit_copy: bool,
+        groups: &mut [AttentionRowGroup<'_, '_, B>],
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<(B::ScratchBuffer, Option<B::ScratchBuffer>), NgptLayerError<B>> {
+        let command_buffer = &mut *command_buffer.debug_group(&format!("ngpt layer {} (row groups)", self.layer_index));
+        let rows = groups.iter().map(|group| group.batch_dim.size()).sum::<u32>();
+        let sublayer_input = Self::sublayer_input(&input, input_copy, command_buffer)?;
+        let NgptSublayer::Mixer(mixer) = &self.sublayer else {
+            panic!("row groups need an attention sublayer");
+        };
+        let attention =
+            (mixer.as_ref() as &dyn Any).downcast_ref::<Attention<B>>().expect("row groups need an attention sublayer");
+        let update =
+            attention.attend_row_groups(sublayer_input, groups, command_buffer).map_err(MixerEncodeError::Attention)?;
+        self.mix_residual(&input, &update, emit_copy, rows, command_buffer)
+    }
+
+    fn sublayer_input(
+        input: &B::ScratchBuffer,
+        input_copy: Option<B::ScratchBuffer>,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<B::ScratchBuffer, NgptLayerError<B>> {
+        match input_copy {
+            Some(input_copy) => Ok(input_copy),
+            None => {
+                let mut copy = command_buffer.allocate_scratch(input.size()).map_err(NgptLayerError::Backend)?;
+                command_buffer.encode_copy(input, &mut copy);
+                Ok(copy)
+            },
+        }
+    }
+
+    fn mix_residual(
+        &self,
+        input: &B::ScratchBuffer,
+        update: &B::ScratchBuffer,
+        emit_copy: bool,
+        rows: u32,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<(B::ScratchBuffer, Option<B::ScratchBuffer>), NgptLayerError<B>> {
         let mut output = command_buffer.allocate_scratch(input.size()).map_err(NgptLayerError::Backend)?;
         let mut output_copy = emit_copy
             .then(|| command_buffer.allocate_scratch(input.size()))
@@ -226,12 +270,12 @@ impl<B: Backend> NgptLayer<B> {
             &self.residual_mix
         };
         residual_mix.encode(
-            &input,
-            &update,
+            input,
+            update,
             &self.residual_weights,
             &mut output,
             output_copy.as_mut(),
-            batch_dim.size(),
+            rows,
             self.model_dim,
             self.epsilon,
             command_buffer,

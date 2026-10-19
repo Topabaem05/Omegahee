@@ -110,11 +110,13 @@ def main() -> int:
     ap.add_argument("--ref-dir", type=Path, default=HERE / "out" / "matrix")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--skip-run", action="store_true")
+    ap.add_argument("--dump-dir", type=Path, help="compare dumps in this directory instead of out/uzu_<backend>_<config>")
+    ap.add_argument("--label", help="config label in the results (default L<loops>_<kv-mode>)")
     args = ap.parse_args()
 
     all_prompts = {prompt["id"]: prompt for prompt in json.loads((HERE / "prompts.json").read_text())}
     tag = f"L{args.loops}_{args.kv_mode}"
-    out_dir = HERE / "out" / f"uzu_{args.backend}_{tag}"
+    out_dir = args.dump_dir or HERE / "out" / f"uzu_{args.backend}_{tag}"
     references, prompts = {}, []
     for pid in args.only:
         suffix = "_long" if pid == "long" else ""
@@ -126,7 +128,8 @@ def main() -> int:
     if not args.skip_run:
         run_uzu(args, prompts, out_dir)
     rows = [
-        compare(prompt, *references[prompt["id"]], out_dir) | {"backend": args.backend, "config": tag} for prompt in prompts
+        compare(prompt, *references[prompt["id"]], out_dir) | {"backend": args.backend, "config": args.label or tag}
+        for prompt in prompts
     ]
     for row in rows:
         print(json.dumps(row))

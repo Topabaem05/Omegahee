@@ -16,5 +16,7 @@ pub mod util;
 mod bench_cold_pool_test;
 #[path = "../session/dory_parity.rs"]
 mod dory_parity;
+#[path = "../session/dory_wavefront.rs"]
+mod dory_wavefront;
 #[path = "../session/model_loading_bench.rs"]
 mod model_loading_bench;
