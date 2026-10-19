@@ -102,4 +102,62 @@ cd reference && ./run_uzu_matrix.sh metal result.json 31 16
 
 - 원본 체크포인트는 수정하지 않습니다. 루프 수 같은 설정은 `--override`나 엔진 로드 시점에서 바꿉니다.
 - 엔진의 기존 모델 파일(층에 `"type"`이 없거나 새 필드가 없는 config.json)은 이 브랜치의 엔진에서 다시 변환해야 합니다.
-- 양자화(`IntSpec`, `MLXSpec`) 변환은 lalamo의 기존 경로를 따릅니다(연구 계획 3단계 기록 참조).
+- 양자화(`IntSpec`, `MLXSpec`) 변환은 lalamo의 기존 경로를 따릅니다(5절).
+- `reference/compare_uzu.py --dump-dir`에는 절대 경로를 씁니다. 덤프는 `engine/`에서 도는 cargo test가 씁니다.
+
+## 5. 양자화 변환
+
+`tools/omega_convert.py`의 `--linear-spec`(transformer 선형층)과 `--readout-spec`(출력 임베딩)에 lalamo 양자화 spec을
+JSON으로 줍니다. 엔진 Metal GEMV(decode)가 지원하는 형식만 쓰십시오. 지원하지 않는 형식은 느린 경로로 떨어지거나
+실행되지 않습니다.
+
+| spec | 엔진 형식 | decode GEMV | 비고 |
+|---|---|---|---|
+| `{"type": "MLXSpec", "bits": 4, "group_size": 64}` | scale + bias(MLX) | 있음(batch 1, batch 2 입력 2행 타일) | Dory INT4 기본 |
+| `{"type": "MLXSpec", "bits": 4, "group_size": 32}` | scale + bias | 있음(batch 1) | 메타데이터가 늘어 g64보다 약간 느림 |
+| `{"type": "MLXSpec", "bits": 8, ...}` | scale + bias 8비트 | 없음 | 쓰지 마십시오 |
+| `{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}` | 대칭 8비트 | 있음 | 8비트 readout |
+| group 128 | — | 없음(GEMV는 group 32, 64만) | |
+
+예(Dory INT4, readout INT4):
+
+```bash
+cd converter && uv run python ../tools/omega_convert.py --spec NVIDIA-Nemotron-Labs-Dory1.0-4B \
+    --checkout ~/code/uzu-omega/models/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16 \
+    --out ~/code/uzu-omega/models/Dory1.0-4B-mlx4g64-r4 --encoding '{"type": "hanashi", "name": "dory"}' \
+    --linear-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}' \
+    --readout-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}'
+```
+
+양자화 모델은 참조와 BF16 허용 오차로 비교할 수 없습니다. 품질 묶음(6절)으로 BF16 변환 결과와 비교합니다.
+
+## 6. 측정
+
+| 도구 | 용도 |
+|---|---|
+| `tools/omega_bench.py` | decode·prefill tok/s(benchmarks-uzu, GPU 60°C 이하 대기, 워밍업 제외 중앙값). 결과는 `bench/results/research_runs.jsonl` |
+| `tools/omega_eval.py` | 품질 묶음(GSM8K, HumanEval, MMLU-Pro, 16K 검색). 결과는 `bench/eval_runs/<label>`, `bench/results/eval_runs.jsonl` |
+| `tools/dory_bench_requests.py` | 고정 요청 묶음(128, 2K, 16K) 생성 |
+| `unit/backends/metal/kernel/matmul/dory_bench.rs` | decode 모양 GEMV 마이크로벤치와 타일 비교(`cargo bench -p uzu-engine --lib -- "DoryLayers"`). 모양 표를 새 모델 것으로 바꿔 씁니다 |
+
+- 이론 상한은 토큰당 가중치 바이트(루프 수만큼 반복되는 층 포함)와 KV 바이트를 함께 셉니다. sliding window 층의 KV는
+  window 길이까지만 셉니다. `omega_bench.py`의 `upper`는 가중치만 셉니다.
+- 같은 GPU를 쓰는 작업(eval 서버 등)이 돌면 속도 수치를 믿을 수 없습니다. 측정할 때는 그 작업을 멈춥니다(eval
+  클라이언트에 `kill -STOP`, 끝나면 `kill -CONT`; greedy라 점수는 바뀌지 않습니다).
+- 커널 종류별 시간은 해당 커널을 빼고(출력은 버림) decode 시간을 다시 재는 ablation으로 나눕니다
+  (`docs/dory_research_log.md`의 ablation 절). GPU trace는 커널별 시간을 대부분 나누지 못했습니다.
+
+## 7. 루프 wavefront decode
+
+반복 층 구간(`TransformerConfig.recurrence`)이 있는 모델은 decode에서 루프 wavefront를 쓸 수 있습니다
+(`encodable_block/transformer/wavefront.rs`). 한 단계에서 토큰 t의 2번째 루프와 토큰 t+1의 1번째 루프를 반복 층에서
+batch 2로 실행하고, t+1은 1루프 조기 종료 출력으로 추측합니다.
+
+- 조건: nGPT 층, 루프 2회, `per_loop` KV, greedy, grammar와 speculator 없음. 켜기: `OMEGA_WAVEFRONT=1`.
+- 새 모델에 쓰기 전 확인:
+  1. 1루프 조기 종료와 2루프 출력의 다음 토큰 일치율(생성 문장 기준). Dory는 92.5%였습니다. 낮으면 이득이 없습니다.
+  2. teacher-forced 덤프(`unit/session/dory_wavefront.rs`의 `teacher_forced_dump_dir`)를 `compare_uzu.py --skip-run
+     --dump-dir`로 참조와 비교하고, 순차 decode 덤프와 logits 차이가 BF16 잡음 수준인지 봅니다.
+  3. 두 턴 대화 상태 검사(`dory_wavefront_turns`).
+  4. 근사 변경이므로 품질 묶음으로 판정합니다.
+- 양자화 모델은 batch 2 GEMV 비용이 이득을 좌우합니다. 형식별 batch 2 타일을 `dory_bench.rs` 타일 비교로 확인합니다.
