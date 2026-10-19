@@ -1,0 +1,5 @@
+E-07-wavefront-pipelined L2 per_loop prompt_128.json: decode 81.04 [80.39, 81.59] tok/s, upper 94.7, efficiency 85.6%, prefill 1452 tok/s
+E-07-wavefront-pipelined L2 per_loop prompt_2048.json: decode 78.44 [77.33, 79.16] tok/s, upper 94.7, efficiency 82.9%, prefill 1410 tok/s
+E-07-wavefront-pipelined L2 per_loop prompt_16384.json: decode 59.36 [58.98, 59.36] tok/s, upper 94.7, efficiency 62.7%, prefill 1164 tok/s
+E-07-wavefront-pipelined L2 per_loop prompt_2048.json: decode 31.33 [31.06, 31.38] tok/s, upper 28.0, efficiency 111.8%, prefill 1524 tok/s
+E-07-wavefront-pipelined-r4 L2 per_loop prompt_2048.json: decode 79.82 [79.74, 79.87] tok/s, upper 99.5, efficiency 80.2%, prefill 1420 tok/s

@@ -23,7 +23,7 @@ use crate::{
         batch_topology::BatchTopology,
         mixer::{
             MixerState,
-            attention::{AttentionRowGroup, AttentionState, rope::PrecalculatedRoPE},
+            attention::{AttentionRowGroup, AttentionState, KVCacheBookkeeping, rope::PrecalculatedRoPE},
         },
     },
     utils::maybe_mut::MaybeMut,
@@ -33,6 +33,13 @@ use crate::{
 pub struct WavefrontCarry<B: Backend> {
     loop_state: B::GlobalBuffer,
     recurrent_inputs: B::GlobalBuffer,
+}
+
+/// KV bookkeeping of every attention slot and the context length (see `TransformerState::bookkeeping`).
+#[derive(Debug, Clone)]
+pub struct TransformerBookkeeping {
+    slots: Box<[Option<KVCacheBookkeeping>]>,
+    context_length: u32,
 }
 
 /// State slots written by each row of a wavefront step.
@@ -92,6 +99,39 @@ impl<B: Backend> TransformerState<B> {
             layer_state.encode_accept(accepted_indices, command_buffer)?;
         }
         Ok(())
+    }
+
+    /// The bookkeeping of every attention slot, to undo the accepts of a command buffer that is
+    /// encoded but never submitted (a speculatively encoded wavefront step).
+    pub fn bookkeeping(&self) -> TransformerBookkeeping {
+        TransformerBookkeeping {
+            slots: self
+                .layer_states
+                .iter()
+                .map(|layer_state| match layer_state {
+                    TransformerLayerStateType::Owned(layer_state) => (layer_state.as_ref() as &dyn std::any::Any)
+                        .downcast_ref::<AttentionState<B>>()
+                        .map(AttentionState::cache_bookkeeping),
+                    TransformerLayerStateType::Shared(_) => None,
+                })
+                .collect(),
+            context_length: self.context_length,
+        }
+    }
+
+    pub fn restore_bookkeeping(
+        &mut self,
+        bookkeeping: &TransformerBookkeeping,
+    ) {
+        for (layer_state, slot) in self.layer_states.iter_mut().zip(&bookkeeping.slots) {
+            if let (TransformerLayerStateType::Owned(layer_state), Some(slot)) = (layer_state, slot) {
+                (layer_state.as_mut() as &mut dyn std::any::Any)
+                    .downcast_mut::<AttentionState<B>>()
+                    .expect("bookkeeping belongs to an attention state")
+                    .restore_cache_bookkeeping(*slot);
+            }
+        }
+        self.context_length = bookkeeping.context_length;
     }
 
     /// Sets the context length after accepting slots directly.

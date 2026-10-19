@@ -48,6 +48,7 @@ impl KVCacheView {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum KVCacheState {
     Full {
         length: u32,
@@ -164,9 +165,26 @@ pub struct AttentionState<B: Backend> {
     pub kv: KVStorage<B>,
 }
 
+/// Lengths and ring offset of an attention cache, without the KV data.
+#[derive(Debug, Clone, Copy)]
+pub struct KVCacheBookkeeping(KVCacheState);
+
 impl<B: Backend> AttentionState<B> {
     pub fn view(&self) -> KVCacheView {
         self.cache.view()
+    }
+
+    /// Accepts update the bookkeeping when they are encoded. Restoring a copy taken before encoding a
+    /// command buffer that is then dropped unsubmitted undoes its accepts (the KV data never changed).
+    pub fn cache_bookkeeping(&self) -> KVCacheBookkeeping {
+        KVCacheBookkeeping(self.cache)
+    }
+
+    pub fn restore_cache_bookkeeping(
+        &mut self,
+        bookkeeping: KVCacheBookkeeping,
+    ) {
+        self.cache = bookkeeping.0;
     }
 
     pub fn create_empty(
