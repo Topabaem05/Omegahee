@@ -105,7 +105,7 @@ cd reference && ./run_uzu_matrix.sh metal result.json 31 16
 - 양자화(`IntSpec`, `MLXSpec`) 변환은 lalamo의 기존 경로를 따릅니다(5절).
 - `conversion.json`의 `output_sha256`은 파일 해시입니다. lalamo 출력은 텐서 저장 순서가 실행마다 달라질 수 있어, 같은
   설정으로 다시 변환해도 해시가 다를 수 있습니다. 내용 비교는 텐서별 바이트 비교로 합니다(Dory 반복 층 INT8 혼합
-  변환에서 해시는 달랐고 텐서 1,0xx개는 모두 같았습니다).
+  변환에서 해시는 달랐고 텐서 572개가 모두 같았습니다).
 - `tools/omega_convert.py`는 `jax`보다 `lalamo`를 먼저 import해야 합니다(lalamo가 JAX 환경 변수를 정함). 순서가 바뀐
   상태로 만든 혼합 정밀도 변환본은 다시 변환한 결과와 텐서가 같았습니다.
 - `reference/compare_uzu.py --dump-dir`에는 절대 경로를 씁니다. 덤프는 `engine/`에서 도는 cargo test가 씁니다.
