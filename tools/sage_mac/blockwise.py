@@ -11,6 +11,12 @@ Dory runs the recurrent layers 16..55 twice. Each of them is trained once, at it
 first-loop student inputs and on second-loop inputs taken from the teacher (stored by a teacher pass before
 training), both against teacher targets. The second loop then only propagates.
 
+Each layer is written when it is done: `<out>/layers/layer_NN.safetensors` (QDQ BF16 weights under Hugging Face
+names; `patch_qdq.py` reads the directory) and, with `--save-state`, `<out>/state/layer_NN.safetensors` (signs
+packed eight per byte in row-major order, direction indices, radius logits, codebook logits, radius bits and
+the channel unpermutation, for packing into a kernel format later). `--resume` loads finished layers instead
+of training them again. `--input-layers-only` stops after layer 15 (for quick training-setting comparisons).
+
     python3 tools/sage_mac/blockwise.py --model <BF16 checkout> --calibration calibration.json \
         --energy <quantize_init out>/energy.pt --paroquant <paroquant checkout> --out <dir>
 """
@@ -24,12 +30,13 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dory_torch import ATTENTION_LINEARS, MLP_LINEARS, DoryTorch, justnorm  # noqa: E402
-from quantize_init import INPUT_KIND  # noqa: E402
+from quantize_init import INPUT_KIND, load_sage  # noqa: E402
 
 
 class LayerRunner:
@@ -57,6 +64,19 @@ def linear_names(model: DoryTorch, layer: int) -> tuple[str, ...]:
     return MLP_LINEARS if model.layer_types[layer] == "mlp" else ATTENTION_LINEARS
 
 
+def sage_state(module) -> dict[str, torch.Tensor]:
+    """The trained spherical state of one matrix, with the int8 signs packed to bits (row-major order)."""
+    signs = module.signs.detach().cpu()
+    return {
+        "signs_packed": torch.from_numpy(np.packbits(signs.numpy().reshape(-1) > 0)),
+        "direction_indices": module.direction_indices.detach().cpu(),
+        "radius_logits": module.radius_logits.detach().float().cpu(),
+        "angle_logits": module.angle_logits.detach().float().cpu(),
+        "radius_bits": module.radius_bits.detach().cpu(),
+        "channel_unpermutation": module.channel_unpermutation.detach().to(torch.int32).cpu(),
+    }
+
+
 def train_layer(
     model: DoryTorch,
     layer: int,
@@ -64,8 +84,8 @@ def train_layer(
     energy: dict,
     sage_class,
     args,
-) -> tuple[dict[str, torch.Tensor], float, float]:
-    """Trains the SAGE parameters of `layer` on (input, loop, target) rows; returns QDQ weights and losses."""
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], float, float]:
+    """Trains the SAGE parameters of `layer` on (input, loop, target) rows; returns QDQ weights, state, losses."""
     runner = LayerRunner(model, layer)
     modules = {}
     for name in linear_names(model, layer):
@@ -102,7 +122,11 @@ def train_layer(
     with torch.no_grad():
         weights = {name: module.materialized_weight().detach() for name, module in modules.items()}
         last = float(loss_on(pairs[: args.batch], weights))
-    return weights, first, last
+    state = {}
+    for name, module in modules.items():
+        for key, value in sage_state(module).items():
+            state[f"{model.linear_name(layer, name)}.{key}"] = value.contiguous()
+    return weights, state, first, last
 
 
 def main() -> int:
@@ -118,11 +142,16 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=4)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--device", default="mps")
+    ap.add_argument("--save-state", action="store_true", help="also write each layer's spherical state")
+    ap.add_argument("--resume", action="store_true", help="load layers already written instead of training them")
+    ap.add_argument("--index-radius-bits", type=int, default=10, help="as in quantize_init.py")
+    ap.add_argument("--input-layers-only", action="store_true", help="train the input layers 0..15 and stop")
     args = ap.parse_args()
-    sys.path.insert(0, str(args.paroquant))
-    from paroquant.optim.sagelinear import SAGEPseudoQuantizedLinear
+    SAGEPseudoQuantizedLinear = load_sage(args.paroquant, args.index_radius_bits)
 
-    args.out.mkdir(parents=True, exist_ok=True)
+    (args.out / "layers").mkdir(parents=True, exist_ok=True)
+    if args.save_state:
+        (args.out / "state").mkdir(exist_ok=True)
     model = DoryTorch(args.model, device=args.device, dtype=torch.bfloat16)
     energy = torch.load(args.energy)
     entries = json.loads(args.calibration.read_text())
@@ -139,7 +168,7 @@ def main() -> int:
     second_loop_inputs: dict[int, list[torch.Tensor]] = {layer: [] for layer in recurrent}
 
     def store(layer: int, kind: str, loop: int, x: torch.Tensor) -> None:
-        if loop == 1 and kind in ("qkvg", "gate_up"):
+        if loop == 1 and kind in ("qkvg", "gate_up") and not args.input_layers_only:
             second_loop_inputs[layer].append(x.detach().clone())
 
     model.observer = store
@@ -154,8 +183,18 @@ def main() -> int:
     with torch.no_grad():
         teacher = [embed(ids) for ids in sequences]
         student = [h.clone() for h in teacher]
-    qdq: dict[str, torch.Tensor] = {}
-    log = []
+    log_path = args.out / "training.json"
+    log = json.loads(log_path.read_text())["layers"] if args.resume and log_path.exists() else []
+
+    def shard(layer: int) -> Path:
+        return args.out / "layers" / f"layer_{layer:02d}.safetensors"
+
+    def load_layer(layer: int) -> dict[str, torch.Tensor]:
+        weights = load_file(str(shard(layer)))
+        return {
+            name: weights[model.linear_name(layer, name)].to(model.device).float()
+            for name in linear_names(model, layer)
+        }
 
     def run_layer_all(layer: int, states, loop: int, weights=None):
         runner = LayerRunner(model, layer)
@@ -166,18 +205,30 @@ def main() -> int:
         started = time.time()
         with torch.no_grad():
             targets = run_layer_all(layer, teacher, loop)
-        pairs = [(s, loop, t) for s, t in zip(student, targets)] + list(extra_pairs)
-        weights, first, last = train_layer(model, layer, pairs, energy, SAGEPseudoQuantizedLinear, args)
-        for name, weight in weights.items():
-            qdq[model.linear_name(layer, name)] = weight.to(torch.bfloat16).cpu().contiguous()
+        if args.resume and shard(layer).exists():
+            weights = load_layer(layer)
+            print(f"layer {layer}: loaded", flush=True)
+        else:
+            pairs = [(s, loop, t) for s, t in zip(student, targets)] + list(extra_pairs)
+            weights, state, first, last = train_layer(model, layer, pairs, energy, SAGEPseudoQuantizedLinear, args)
+            qdq = {model.linear_name(layer, n): w.to(torch.bfloat16).cpu().contiguous() for n, w in weights.items()}
+            save_file(qdq, str(shard(layer)))
+            weights = {n: qdq[model.linear_name(layer, n)].to(model.device).float() for n in weights}
+            if args.save_state:
+                save_file(state, str(args.out / "state" / f"layer_{layer:02d}.safetensors"))
+            log.append({"layer": layer, "loss_before": first, "loss_after": last, "seconds": time.time() - started})
+            log_path.write_text(
+                json.dumps({"args": {k: str(v) for k, v in vars(args).items()}, "layers": log}, indent=1)
+            )
+            print(f"layer {layer}: loss {first:.5f} -> {last:.5f} ({time.time() - started:.0f}s)", flush=True)
         with torch.no_grad():
             student = run_layer_all(layer, student, loop, weights)
             teacher = targets
-        log.append({"layer": layer, "loss_before": first, "loss_after": last, "seconds": time.time() - started})
-        print(f"layer {layer}: loss {first:.5f} -> {last:.5f} ({time.time() - started:.0f}s)", flush=True)
 
     for layer in range(n_in):
         train_and_propagate(layer, 0)
+    if args.input_layers_only:
+        return 0
     teacher_inputs, student_inputs = teacher, student
     with torch.no_grad():
         teacher = [justnorm(h + h) for h in teacher_inputs]
@@ -194,21 +245,12 @@ def main() -> int:
         teacher = [justnorm(s + i) for s, i in zip(teacher_state, teacher_inputs)]
         student = [justnorm(s + i) for s, i in zip(student_state, student_inputs)]
         for layer in recurrent:
-            student_weights = {
-                name: qdq[model.linear_name(layer, name)].to(model.device).float()
-                for name in linear_names(model, layer)
-            }
             teacher = run_layer_all(layer, teacher, 1)
-            student = run_layer_all(layer, student, 1, student_weights)
+            student = run_layer_all(layer, student, 1, load_layer(layer))
         teacher = [justnorm(h) for h in teacher]
         student = [justnorm(h) for h in student]
     for layer in range(n_in + n_rec, n_layers):
         train_and_propagate(layer, 0)
-
-    save_file(qdq, str(args.out / "qdq_weights.safetensors"))
-    (args.out / "training.json").write_text(
-        json.dumps({"args": {k: str(v) for k, v in vars(args).items()}, "layers": log}, indent=1)
-    )
     return 0
 
 

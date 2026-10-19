@@ -2,6 +2,7 @@
 """Put QDQ weights (Hugging Face names, from `quantize_init.py`) into a converted Ω-Hee BF16 Dory model.
 
 Fused engine matrices take their rows from several Hugging Face matrices (qkvg = q, k, v, g; up = up, gate).
+`--qdq` is one safetensors file or a directory of them (`blockwise.py` writes one per layer).
 `--layers` picks the groups to replace: `input` (0..15), `recurrent` (16..55), `output` (56..71) or `all`;
 the other layers keep the BF16 weights. Other files of the base model are copied.
 
@@ -48,13 +49,18 @@ def main() -> int:
         header = json.loads(file.read(header_size))
     metadata = header.pop("__metadata__", {})
     data = np.memmap(base_path, dtype=np.uint8, mode="r", offset=8 + header_size)
-    with args.qdq.open("rb") as file:
-        qdq_header_size = struct.unpack("<Q", file.read(8))[0]
-        qdq_header = json.loads(file.read(qdq_header_size))
-    qdq_data = np.memmap(args.qdq, dtype=np.uint8, mode="r", offset=8 + qdq_header_size)
+    qdq_tensors = {}
+    for qdq_path in sorted(args.qdq.glob("*.safetensors")) if args.qdq.is_dir() else [args.qdq]:
+        with qdq_path.open("rb") as file:
+            qdq_header_size = struct.unpack("<Q", file.read(8))[0]
+            qdq_header = json.loads(file.read(qdq_header_size))
+        qdq_header.pop("__metadata__", None)
+        qdq_data = np.memmap(qdq_path, dtype=np.uint8, mode="r", offset=8 + qdq_header_size)
+        for name, info in qdq_header.items():
+            qdq_tensors[name] = (qdq_data, info["data_offsets"])
 
     def qdq_bytes(name: str) -> bytes:
-        start, end = qdq_header[name]["data_offsets"]
+        qdq_data, (start, end) = qdq_tensors[name]
         return qdq_data[start:end].tobytes()
 
     replaced = 0

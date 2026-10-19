@@ -39,6 +39,15 @@ INPUT_KIND = {
 }
 
 
+def load_sage(paroquant: Path, index_radius_bits: int):
+    """`SAGEPseudoQuantizedLinear` from a local paroquant checkout, with the given index plus radius bits."""
+    sys.path.insert(0, str(paroquant))
+    from paroquant.optim import sagelinear, sphlinear
+
+    sphlinear.INDEX_AND_RADIUS_BITS = sagelinear.INDEX_AND_RADIUS_BITS = index_radius_bits
+    return sagelinear.SAGEPseudoQuantizedLinear
+
+
 def collect_energy(
     model: DoryTorch, sequences: list[list[int]], max_tokens: int
 ) -> dict[tuple[int, str], torch.Tensor]:
@@ -69,13 +78,14 @@ def main() -> int:
     ap.add_argument("--max-tokens", type=int, default=1024)
     ap.add_argument("--device", default="mps")
     ap.add_argument("--save-state", action="store_true", help="also save each matrix's spherical state")
+    ap.add_argument("--index-radius-bits", type=int, default=10)
+    ap.add_argument("--energy", type=Path, help="energy.pt from an earlier run (default: <out>/energy.pt)")
     args = ap.parse_args()
-    sys.path.insert(0, str(args.paroquant))
-    from paroquant.optim.sagelinear import SAGEPseudoQuantizedLinear
+    SAGEPseudoQuantizedLinear = load_sage(args.paroquant, args.index_radius_bits)
 
     args.out.mkdir(parents=True, exist_ok=True)
     model = DoryTorch(args.model, device=args.device, dtype=torch.bfloat16)
-    energy_path = args.out / "energy.pt"
+    energy_path = args.energy or args.out / "energy.pt"
     if energy_path.exists():
         energy = torch.load(energy_path)
     else:
