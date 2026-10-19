@@ -41,6 +41,7 @@
 | E-07 | wavefront 다음 단계를 추측이 맞다고 보고 미리 인코딩(맞으면 제출, 틀리면 버리고 KV 장부 복원) | 단계마다 드러나던 CPU 인코딩 시간 숨김 | BF16 30.96 / INT4 76.16 | BF16 31.33 [31.06, 31.38] / INT4 78.44 [77.33, 79.16] | (이 커밋) | 채택(출력 토큰 E-06과 동일, INT4 +3.0%) |
 | E-08 | MLX(ScaleBias) INT4 g64 m=2 GEMV에 입력 2행 타일(2 simdgroup, 출력 16행, lane 8) | batch 2가 가중치를 한 번만 읽음 | wavefront INT4 78.44 | wavefront INT4 82.27 [81.42, 82.35] (readout INT4: 83.78) | (이 커밋) | 채택(GEMV 정확도 동일, +4.9%) |
 | E-09 | query scale이 있는 attention의 INT8 KV(전체 attention 9층), `OMEGA_INT8_KV=1` | 16K에서 전체 attention KV 읽기 절반 | wavefront INT4 r4 2K 83.99 / 16K 63.13 | 2K 83.01 [82.08, 84.05] / 16K 69.78 [69.07, 71.45] | (이 커밋) | 16K +10.5%(16K/2K 75%→84%), parity 근사 오차 증가, 품질 묶음 판정 대기 |
+| E-10 | 잔차 mix의 두 내부 norm 합을 reduction 한 번으로(barrier 9→6, 출력 비트 동일) | 단일 threadgroup 커널의 barrier 지연 | wavefront INT4 r4 83.79(ABBA 평균) | 83.84(ABBA 평균) | (기록만) | 기각(차이 없음, 되돌림) |
 
 ### 기준선 전체 (E-00, 2루프 per_loop, 워밍업 제외 5회 중앙값 [최소, 최대])
 
@@ -324,3 +325,28 @@ E-08 측정에서 순차 INT4가 E-03보다 낮게 나와(66.49 대 67.47) E-03 
 | 묶음 점수 | 78.46% |
 
 연구 계획의 품질 조건: 1차 목표 ≥ 97%(76.11%), 확장 목표 ≥ 95%(74.54%).
+
+### wavefront 단계 ablation (E-09 엔진, INT4 + readout INT4, 2K)
+
+ablation 중에는 추측을 항상 맞은 것으로 처리해 모든 pass가 두 행 단계가 되게 했습니다(출력을 버리면 추측 일치율이 바뀌어
+pass 비용이 섞이기 때문). 결과 `bench/results/ablation_wavefront_r4_e09_20261019.txt`, 기준 11.17~11.29ms/pass.
+
+| 뺀 커널 | 줄어든 시간 |
+|---|---|
+| 선형층 GEMV | 8.09ms(이상 약 6.7ms) |
+| attention 핵심부 | 1.85ms |
+| 잔차 mix(72회) | 0.72ms |
+| readout | 0.71ms |
+| SwiGLU norm / gate norm / QKV norm | 0.25 / 0.22 / 0.18ms |
+| 행 묶음 복사 | 0.04ms |
+| 작은 커널 모두 | 1.19ms |
+
+E-10에서 잔차 mix 안의 barrier를 줄여도 빨라지지 않았으므로, 작은 커널 비용은 커널 안 계산보다 dispatch 경계와 그
+앞뒤 대기입니다. 2루프 INT4 100 tok/s(토큰당 10ms)까지 남은 약 1.9ms를 줄일 후보와 추정 효과:
+
+| 후보 | 추정 효과 | 비고 |
+|---|---|---|
+| 잔차 mix, gate norm, SwiGLU norm을 이웃 GEMV의 prologue/epilogue로 합침 | 0.5~0.8ms | GEMV 템플릿 변경이 큼 |
+| 모델 안(의존 dispatch) 기준 m=1, m=2 GEMV 타일 재조정 | 0.3~0.6ms | 마이크로벤치는 독립 dispatch라 모델 안 차이를 놓침 |
+| 행 묶음 attention을 prepare 둘 → attention 둘 순서로 인코딩(동시 실행 늘림), QKV norm과 prepare 합침 | 0.1~0.3ms | |
+| 두 후보 추측(batch 3)으로 빈 단계(약 4%) 줄임 | 0.2~0.4ms | m=3 GEMV 타일 필요 |
