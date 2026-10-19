@@ -37,7 +37,7 @@
 | E-03 | attention의 gate scale + sigmoid gate + 출력 L2 norm을 커널 하나로 합침 | 토큰당 dispatch 약 112개 제거 | BF16 24.63 / INT4 67.08 | BF16 24.70 [24.65, 24.80] / INT4 67.47 [67.17, 67.58] | (이 커밋) | E-02+E-03 묶음 채택(출력 비트 동일, INT4 +0.9%, 범위 겹치지 않음) |
 | E-04 | sliding window층 single-pass 대신 two-pass(임계 KV 1,024→256) | 16 threadgroup single-pass가 지연 병목 | INT4 67.47 | INT4 67.35 [66.77, 67.38] (128: 70.90) | (기록만) | 기각(개선 없음, 되돌림) |
 | E-05 | readout INT8 대칭 → INT4 MLX g64(변환만 변경) | readout 읽기 0.35GB→0.19GB | INT4 67.47 | 69.02 [68.39, 69.92] | (변환 설정) | 속도는 +2.3%, 품질 묶음 판정 대기 |
-| E-06 | 루프 wavefront decode(recurrent 층 batch 2, 1루프 조기 종료로 다음 토큰 추측) | recurrent 가중치와 고정 비용을 두 토큰이 공유 | 하네스 순차 INT4 63.31 / BF16 23.66 | 하네스 INT4 75.38 / BF16 30.99 (2K) | (이 커밋) | 엔진 API·검증 완료, stream 통합 후 benchmarks-uzu로 판정 |
+| E-06 | 루프 wavefront decode(recurrent 층 batch 2, 1루프 조기 종료로 다음 토큰 추측), `OMEGA_WAVEFRONT=1` | recurrent 가중치와 고정 비용을 두 토큰이 공유 | BF16 24.70 / INT4 67.47 | BF16 30.96 [30.92, 30.97] / INT4 76.16 [75.56, 76.28] | `67e85fb`, (이 커밋) | 속도 채택(INT4 +12.9%, BF16 +25.3%), 근사 변경이라 품질 묶음 판정 후 기본값 결정 |
 
 ### 기준선 전체 (E-00, 2루프 per_loop, 워밍업 제외 5회 중앙값 [최소, 최대])
 
@@ -210,3 +210,24 @@ attention 행 묶음(`Attention::attend_row_groups`, `NgptLayer::encode_row_grou
 
 하네스 순차 decode는 stream(이전 forward 출력으로 다음 forward를 미리 인코딩)보다 느립니다(INT4 2K 63.3 대 67.5).
 공식 수치는 stream에 넣은 뒤 `tools/omega_bench.py`로 잽니다.
+
+### E-06 stream 통합과 공식 측정
+
+`engine/language_model/stream/wavefront.rs`: `OMEGA_WAVEFRONT=1`이고 greedy, grammar 없음, speculator 없음, 모델이
+wavefront를 지원할 때 stream이 wavefront로 decode합니다. 단계마다 CPU가 결과를 읽어 다음 단계(이월 행 유무, 추측
+토큰)를 정합니다. 토큰을 돌려주는 시점마다 확정된 KV가 순차 decode와 같으므로, stream을 닫을 때 마지막 토큰을 순차
+pass 한 번으로 넣어 다음 대화 턴이 순차 경로와 같은 상태에서 시작합니다.
+
+`tools/omega_bench.py`(워밍업 제외 5회 중앙값, eval 일시 정지):
+
+| 모델 | 프롬프트 | 이전 | wavefront | 개선 |
+|---|---|---|---|---|
+| INT4 | 128 | 70.58(E-00) | 79.52 [78.97, 79.68] | +12.7% |
+| INT4 | 2,048 | 67.47(E-03) | 76.16 [75.56, 76.28] | +12.9% |
+| INT4 | 16,384 | 54.40(E-00) | 58.00 [57.94, 58.05] | +6.6% |
+| BF16 | 2,048 | 24.70(E-03) | 30.96 [30.92, 30.97] | +25.3% |
+
+- 16K에서 개선이 작은 이유: 두 행이 각자 자기 루프 KV를 읽으므로 KV 읽기는 줄지 않고, 16K에서는 KV 비중이 큽니다.
+- 순차 stream은 이전 forward 출력으로 다음 forward를 미리 인코딩해 CPU 시간을 가리지만, wavefront는 아직 단계마다
+  동기화합니다. 하네스에서 같은 동기화가 순차 decode를 토큰당 약 0.97ms 늦췄으므로(63.31 대 67.47), 다음 실험은
+  다음 단계를 추측이 맞다고 보고 미리 인코딩해 두고, 맞으면 제출하고 틀리면 버리는 방식입니다(KV 장부는 저장 후 복원).

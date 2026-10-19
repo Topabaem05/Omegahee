@@ -29,6 +29,11 @@ use crate::{
     utils::size_for_shape::size_for_shape,
 };
 
+#[path = "wavefront.rs"]
+mod wavefront;
+
+use wavefront::WavefrontDecoding;
+
 enum ForwardPassChaining<B: Backend> {
     Constant {
         token: u64,
@@ -112,6 +117,8 @@ enum DecodingState<B: Backend> {
         output_norm: Option<(B::ScratchBuffer, usize)>,
         capture_span: Option<CaptureMatcherSpan>,
     },
+    /// Loop-wavefront decoding (`wavefront.rs`) owns the decode state.
+    Wavefront,
     Halted,
     Invalid,
     Closed,
@@ -138,6 +145,7 @@ pub struct LanguageModelStream<'a, B: Backend> {
     context_ring: Option<B::GlobalBuffer>,
     decoding_state: DecodingState<B>,
     metrics: TokenStreamMetrics,
+    wavefront: Option<WavefrontDecoding<B>>,
 }
 
 impl<'a, B: Backend> LanguageModelStream<'a, B> {
@@ -362,6 +370,12 @@ impl<'a, B: Backend> LanguageModelStream<'a, B> {
             }
         };
 
+        #[cfg(grammar)]
+        let has_grammar = options.grammar.is_some();
+        #[cfg(not(grammar))]
+        let has_grammar = false;
+        let wavefront = WavefrontDecoding::create(model, &options.sampling_method, has_grammar)?;
+
         Ok(LanguageModelStream {
             model,
             model_state,
@@ -370,10 +384,14 @@ impl<'a, B: Backend> LanguageModelStream<'a, B> {
             context_ring,
             decoding_state,
             metrics,
+            wavefront,
         })
     }
 
     pub async fn generate(&mut self) -> Result<Option<u64>, LanguageModelStreamError<B>> {
+        if self.wavefront.is_some() {
+            return self.generate_wavefront().await;
+        }
         let (mut prev_output, acceptance): (
             ForwardPassChaining<B>,
             Option<(<B::CommandBuffer as CommandBuffer>::Encoding, Option<CaptureMatcherSpan>)>,
@@ -513,7 +531,7 @@ impl<'a, B: Backend> LanguageModelStream<'a, B> {
                 }
             },
             DecodingState::Halted => return Ok(None),
-            DecodingState::Invalid => unreachable!(),
+            DecodingState::Wavefront | DecodingState::Invalid => unreachable!(),
             DecodingState::Closed => return Ok(None),
         };
 
@@ -881,6 +899,7 @@ impl<'a, B: Backend> LanguageModelStream<'a, B> {
 
                 Some(full[num_accepted].2)
             },
+            DecodingState::Wavefront => self.close_wavefront().await?,
             DecodingState::Halted => None,
             DecodingState::Invalid => None, // TODO: proper error handling
             DecodingState::Closed => self.model_state.last_output_token,

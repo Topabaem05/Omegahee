@@ -1,0 +1,4 @@
+E-06-wavefront L2 per_loop prompt_128.json: decode 79.52 [78.97, 79.68] tok/s, upper 94.7, efficiency 84.0%, prefill 1466 tok/s
+E-06-wavefront L2 per_loop prompt_2048.json: decode 76.16 [75.56, 76.28] tok/s, upper 94.7, efficiency 80.4%, prefill 1369 tok/s
+E-06-wavefront L2 per_loop prompt_16384.json: decode 58.00 [57.94, 58.05] tok/s, upper 94.7, efficiency 61.3%, prefill 1168 tok/s
+E-06-wavefront L2 per_loop prompt_2048.json: decode 30.96 [30.92, 30.97] tok/s, upper 28.0, efficiency 110.5%, prefill 1518 tok/s
