@@ -1,0 +1,11 @@
+nvfp4-r4-fp8s-wavefront-e19 gsm8k: 179/200 = 89.5%
+nvfp4-r4-fp8s-wavefront-e19 humaneval: 140/164 = 85.4%
+nvfp4-r4-fp8s-wavefront-e19 mmlu_pro: 214/500 = 42.8%
+nvfp4-r4-fp8s-wavefront-e19 long: 18/20 = 90.0%
+nvfp4-r4-fp8s-wavefront-e19 suite score 76.92%
+nvfp4-r4-fp8s-wavefront-int8kv-e19 gsm8k: 177/200 = 88.5%
+nvfp4-r4-fp8s-wavefront-int8kv-e19 humaneval: 139/164 = 84.8%
+nvfp4-r4-fp8s-wavefront-int8kv-e19 mmlu_pro: 217/500 = 43.4%
+nvfp4-r4-fp8s-wavefront-int8kv-e19 long: 18/20 = 90.0%
+nvfp4-r4-fp8s-wavefront-int8kv-e19 suite score 76.66%
+EVAL_QUEUE8_DONE
