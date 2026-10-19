@@ -365,3 +365,162 @@ fn dory_fp4_matmul_matches_cpu() {
         }
     }
 }
+
+/// Experimental 2.5-bit spherical vector quantization (`SphericalVqGemv`): random planes on Dory shapes.
+struct SvqHost {
+    signs: Vec<u8>,
+    directions: Vec<u8>,
+    codes: Vec<u32>,
+    grid: Vec<half::f16>,
+    codebook: Vec<half::f16>,
+    input: Vec<bf16>,
+}
+
+impl SvqHost {
+    fn new(
+        batch: u32,
+        k: u32,
+        n: u32,
+        seed: u64,
+    ) -> Self {
+        use rand::{RngExt, SeedableRng, rngs::SmallRng};
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let vectors = (n * k / 8) as usize;
+        let codebook = (0..256)
+            .flat_map(|_| {
+                let values = (0..8).map(|_| rng.random_range(0.05f32..1.0f32)).collect::<Vec<_>>();
+                let norm = values.iter().map(|value| value * value).sum::<f32>().sqrt();
+                values.into_iter().map(move |value| half::f16::from_f32(value / norm))
+            })
+            .collect();
+        Self {
+            signs: (0..vectors).map(|_| rng.random_range(0..=255u8)).collect(),
+            directions: (0..vectors).map(|_| rng.random_range(0..=255u8)).collect(),
+            codes: (0..vectors / 16).map(|_| rng.random_range(0..u32::MAX)).collect(),
+            grid: (0..vectors / 16)
+                .flat_map(|_| [rng.random_range(0.01f32..0.03f32), rng.random_range(0.002f32..0.01f32)])
+                .map(half::f16::from_f32)
+                .collect(),
+            codebook,
+            input: (0..batch * k).map(|_| bf16::from_f32(rng.random_range(-0.3f32..0.3f32))).collect(),
+        }
+    }
+
+    fn weight_bytes(&self) -> usize {
+        self.signs.len() + self.directions.len() + self.codes.len() * 4 + self.grid.len() * 2
+    }
+}
+
+struct SvqBuffers<B: Backend> {
+    signs: B::GlobalBuffer,
+    directions: B::GlobalBuffer,
+    codes: B::GlobalBuffer,
+    grid: B::GlobalBuffer,
+    codebook: B::GlobalBuffer,
+    input: B::GlobalBuffer,
+    output: B::GlobalBuffer,
+}
+
+impl<B: Backend> SvqBuffers<B> {
+    fn upload(
+        context: &B::Context,
+        host: &SvqHost,
+        batch: u32,
+        n: u32,
+    ) -> Self {
+        use crate::tests::helpers::{create_buffer, create_buffer_with_data};
+        Self {
+            signs: create_buffer_with_data::<B, u8>(context, &host.signs),
+            directions: create_buffer_with_data::<B, u8>(context, &host.directions),
+            codes: create_buffer_with_data::<B, u32>(context, &host.codes),
+            grid: create_buffer_with_data::<B, half::f16>(context, &host.grid),
+            codebook: create_buffer_with_data::<B, half::f16>(context, &host.codebook),
+            input: create_buffer_with_data::<B, bf16>(context, &host.input),
+            output: create_buffer::<B, bf16>(context, (batch * n) as usize),
+        }
+    }
+
+    fn encode(
+        &mut self,
+        kernel: &<B::Kernels as Kernels>::SphericalVqGemvKernel,
+        k: u32,
+        n: u32,
+        command_buffer: &mut <B::CommandBuffer as crate::backends::common::CommandBuffer>::Encoding,
+    ) {
+        use crate::backends::common::kernel::SphericalVqGemvKernel;
+        kernel.encode(
+            &self.signs,
+            &self.directions,
+            &self.codes,
+            &self.grid,
+            &self.codebook,
+            &self.input,
+            &mut self.output,
+            k,
+            n,
+            command_buffer,
+        );
+    }
+}
+
+fn svq_run<B: Backend>(
+    host: &SvqHost,
+    batch: u32,
+    k: u32,
+    n: u32,
+) -> Vec<bf16> {
+    use crate::backends::common::{
+        CommandBufferEncoding, CommandBufferExecutable, CommandBufferPending, Context, kernel::SphericalVqGemvKernel,
+    };
+    let context = futures::executor::block_on(B::Context::new()).expect("context");
+    let kernel =
+        <B::Kernels as Kernels>::SphericalVqGemvKernel::new(&context, crate::data_type::DataType::BF16, batch).unwrap();
+    let mut buffers = SvqBuffers::<B>::upload(&context, host, batch, n);
+    let mut command_buffer = context.create_command_buffer(None, None).unwrap();
+    buffers.encode(&kernel, k, n, &mut command_buffer);
+    futures::executor::block_on(command_buffer.end_encoding().submit().wait_until_completed()).unwrap();
+    crate::tests::helpers::buffer_to_vec::<B, bf16>(&buffers.output)
+}
+
+/// The Metal spherical VQ GEMV against the CPU reference on Dory shapes, batch 1 and 2.
+#[uzu_engine_macros::uzu_test]
+fn dory_svq_gemv_matches_cpu() {
+    for &(layer, k, n) in &[DORY_LINEARS[1], ("small", 512, 96)] {
+        for batch in [1u32, 2] {
+            let host = SvqHost::new(batch, k, n, 3);
+            let cpu = svq_run::<crate::backends::cpu::Cpu>(&host, batch, k, n);
+            let metal = svq_run::<Metal>(&host, batch, k, n);
+            let scale = cpu.iter().map(|value| f32::from(*value).abs()).fold(0.0f32, f32::max);
+            let max_error =
+                cpu.iter().zip(&metal).map(|(a, b)| (f32::from(*a) - f32::from(*b)).abs()).fold(0.0f32, f32::max);
+            eprintln!("SVQ {layer} m{batch}: max error {max_error:.3e} (output max {scale:.3e})");
+            assert!(scale > 0.01 && max_error <= scale * 1e-2 + 1e-3, "SVQ {layer} m{batch} mismatch: {max_error}");
+        }
+    }
+}
+
+#[uzu_bench]
+fn bench_dory_svq_gemv(c: &mut Criterion) {
+    let context = crate::tests::util::shared_metal_context();
+    let mut group = c.benchmark_group("Metal/Kernel/DoryLayers/SVQ_2p5b");
+    for &(layer, k, n) in DORY_LINEARS {
+        for batch in [1u32, 2] {
+            use crate::backends::common::kernel::SphericalVqGemvKernel;
+            let host = SvqHost::new(batch, k, n, 9);
+            let kernel = <<Metal as Backend>::Kernels as Kernels>::SphericalVqGemvKernel::new(
+                &context,
+                crate::data_type::DataType::BF16,
+                batch,
+            )
+            .unwrap();
+            let mut pool =
+                ColdPool::new(host.weight_bytes(), || SvqBuffers::<Metal>::upload(&context, &host, batch, n));
+            group.throughput(Throughput::Bytes(host.weight_bytes() as u64));
+            group.bench_function(BenchmarkId::from_parameter(format!("{layer}_M[{batch}]K[{k}]N[{n}]")), |b| {
+                iter_encode_loop::<Metal, _>(&context, b, |command_buffer| {
+                    pool.next_mut().encode(&kernel, k, n, command_buffer);
+                });
+            });
+        }
+    }
+}
