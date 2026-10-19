@@ -1,0 +1,17 @@
+# FP4 E4M3 GEMV, [groups, rows] scales: cold pool of copies run back to back (default) vs one warm buffer set reused, each dispatch waiting for the previous one (_warm). M5 Pro.
+Fp4E4M3_BF16_gs16_4b_go/qkvg_M[1]K[2560]N[10240] 51.593 µs
+Fp4E4M3_BF16_gs16_4b_go/qkvg_M[2]K[2560]N[10240] 52.249 µs
+Fp4E4M3_BF16_gs16_4b_go/out_M[1]K[4096]N[2560] 20.311 µs
+Fp4E4M3_BF16_gs16_4b_go/out_M[2]K[4096]N[2560] 20.627 µs
+Fp4E4M3_BF16_gs16_4b_go/up_M[1]K[2560]N[14336] 72.468 µs
+Fp4E4M3_BF16_gs16_4b_go/up_M[2]K[2560]N[14336] 74.019 µs
+Fp4E4M3_BF16_gs16_4b_go/down_M[1]K[7168]N[2560] 38.905 µs
+Fp4E4M3_BF16_gs16_4b_go/down_M[2]K[7168]N[2560] 38.486 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/qkvg_M[1]K[2560]N[10240] 35.547 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/qkvg_M[2]K[2560]N[10240] 42.481 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/out_M[1]K[4096]N[2560] 14.984 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/out_M[2]K[4096]N[2560] 17.791 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/up_M[1]K[2560]N[14336] 49.078 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/up_M[2]K[2560]N[14336] 56.657 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/down_M[1]K[7168]N[2560] 25.838 µs
+Fp4E4M3_BF16_gs16_4b_go_warm/down_M[2]K[7168]N[2560] 30.515 µs

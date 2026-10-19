@@ -1,0 +1,14 @@
+# Relative A/B of OMEGA_PREFETCH (out-projection weights read during the attention kernel), wavefront 2K, nvfp4-r4-fp8s.
+# Another session ran a 6-process CPU job throughout (CPU idle 25-58%); absolute numbers are not comparable with clean runs.
+idle 25.81%
+E-22c-prefetch0 L2 per_loop prompt_2048.json: decode 86.67 [86.20, 86.92] tok/s, upper 99.3, efficiency 87.3%, prefill 1384 tok/s
+idle 58.1%
+E-22c-prefetch1 L2 per_loop prompt_2048.json: decode 82.96 [82.51, 83.33] tok/s, upper 99.3, efficiency 83.6%, prefill 1399 tok/s
+idle 56.65%
+E-22c-prefetch1 L2 per_loop prompt_2048.json: decode 82.27 [81.79, 82.59] tok/s, upper 99.3, efficiency 82.9%, prefill 1255 tok/s
+idle 52.34%
+E-22c-prefetch0 L2 per_loop prompt_2048.json: decode 81.82 [80.78, 85.13] tok/s, upper 99.3, efficiency 82.4%, prefill 1146 tok/s
+idle 43.28%
+E-22c-prefetch0 L2 per_loop prompt_2048.json: decode 82.30 [81.24, 85.94] tok/s, upper 99.3, efficiency 82.9%, prefill 1134 tok/s
+idle 40.14%
+E-22c-prefetch1 L2 per_loop prompt_2048.json: decode 79.02 [78.56, 81.42] tok/s, upper 99.3, efficiency 79.6%, prefill 1170 tok/s

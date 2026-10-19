@@ -1,0 +1,36 @@
+{
+  "label": "nvfp4-r4-fp8s-wavefront-e19",
+  "model": "/Users/topamini/code/uzu-omega/models/Dory1.0-4B-nvfp4-r4-fp8s",
+  "tasks": {
+    "gsm8k": {
+      "score": 0.895,
+      "correct": 179,
+      "items": 200,
+      "completion_tokens": 55142,
+      "seconds": 1168.9
+    },
+    "humaneval": {
+      "score": 0.8536585365853658,
+      "correct": 140,
+      "items": 164,
+      "completion_tokens": 39713,
+      "seconds": 3382.5
+    },
+    "mmlu_pro": {
+      "score": 0.428,
+      "correct": 214,
+      "items": 500,
+      "completion_tokens": 1087,
+      "seconds": 151.1
+    },
+    "long": {
+      "score": 0.9,
+      "correct": 18,
+      "items": 20,
+      "completion_tokens": 140,
+      "seconds": 743.2
+    }
+  },
+  "suite_score": 0.7691646341463415,
+  "limit": null
+}

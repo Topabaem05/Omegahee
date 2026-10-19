@@ -34,10 +34,12 @@ fn bench_dory_shapes(
     bits: u32,
     quant_method: QuantizationMethod,
 ) {
-    bench_dory_shapes_with(c, label, shapes, group_size, bits, quant_method, false);
+    bench_dory_shapes_with(c, label, shapes, group_size, bits, quant_method, false, false);
 }
 
 /// `group_output`: quantization parameters stored [groups, rows], as converted output-input models hold them.
+/// `warm`: one buffer set for every iteration, so the weights can stay cached and each dispatch waits for
+/// the previous one (same output buffer), against the default pool of cold copies run back to back.
 fn bench_dory_shapes_with(
     c: &mut Criterion,
     label: &str,
@@ -46,6 +48,7 @@ fn bench_dory_shapes_with(
     bits: u32,
     quant_method: QuantizationMethod,
     group_output: bool,
+    warm: bool,
 ) {
     let context = crate::tests::util::shared_metal_context();
     let mut group = c.benchmark_group(format!("{}/Kernel/DoryLayers/{}", type_short_name::<Metal>(), label));
@@ -56,8 +59,12 @@ fn bench_dory_shapes_with(
             if group_output {
                 input = input.with_group_output();
             }
-            let mut buffers =
-                ColdPool::new(input.weight_buffer_bytes(), || QuantBuffers::<Metal, bf16>::allocate(&context, &input));
+            let pool_bytes = if warm {
+                usize::MAX / 2
+            } else {
+                input.weight_buffer_bytes()
+            };
+            let mut buffers = ColdPool::new(pool_bytes, || QuantBuffers::<Metal, bf16>::allocate(&context, &input));
             let mut matmul = <<Metal as Backend>::Kernels as Kernels>::MatmulKernel::new(
                 &context,
                 <bf16 as crate::data_type::DataTypeRepr>::data_type(),
@@ -86,9 +93,37 @@ fn bench_dory_layers(c: &mut Criterion) {
     bench_dory_shapes(c, "Sym_BF16_gs64_8b_linears", DORY_LINEARS, 64, 8, QuantizationMethod::ScaleSymmetric);
     bench_dory_shapes(c, "Fp4_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4);
     bench_dory_shapes(c, "Fp4E4M3_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4E4M3);
-    bench_dory_shapes_with(c, "ScaleBias_BF16_gs64_4b_go", DORY_LINEARS, 64, 4, QuantizationMethod::ScaleBias, true);
-    bench_dory_shapes_with(c, "Fp4_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4, true);
-    bench_dory_shapes_with(c, "Fp4E4M3_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4E4M3, true);
+    bench_dory_shapes_with(
+        c,
+        "ScaleBias_BF16_gs64_4b_go",
+        DORY_LINEARS,
+        64,
+        4,
+        QuantizationMethod::ScaleBias,
+        true,
+        false,
+    );
+    bench_dory_shapes_with(c, "Fp4_BF16_gs16_4b_go", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4, true, false);
+    bench_dory_shapes_with(
+        c,
+        "Fp4E4M3_BF16_gs16_4b_go",
+        DORY_LINEARS,
+        16,
+        4,
+        QuantizationMethod::ScaleFp4E4M3,
+        true,
+        false,
+    );
+    bench_dory_shapes_with(
+        c,
+        "Fp4E4M3_BF16_gs16_4b_go_warm",
+        DORY_LINEARS,
+        16,
+        4,
+        QuantizationMethod::ScaleFp4E4M3,
+        true,
+        true,
+    );
     bench_dory_shapes(c, "ScaleBias_BF16_gs64_4b_readout", &[DORY_READOUT], 64, 4, QuantizationMethod::ScaleBias);
 }
 
