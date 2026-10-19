@@ -1,0 +1,9 @@
+OMEGA_TILE_M1=default        decode  60.88 tok/s [60.52, 61.13] same text True
+OMEGA_TILE_M1=2,1,1,32,4     decode  54.82 tok/s [54.76, 54.98] same text True
+OMEGA_TILE_M1=2,2,1,32,4     decode  59.05 tok/s [58.95, 59.35] same text True
+OMEGA_TILE_M1=2,4,1,32,4     decode  61.28 tok/s [60.97, 61.39] same text True
+OMEGA_TILE_M1=4,2,1,32,4     decode  59.18 tok/s [59.06, 59.71] same text True
+OMEGA_TILE_M1=4,4,1,32,4     decode  60.86 tok/s [60.50, 60.98] same text True
+OMEGA_TILE_M1=4,8,1,32,4     decode  57.13 tok/s [56.77, 57.26] same text True
+OMEGA_TILE_M1=8,2,1,32,4     decode  59.85 tok/s [59.20, 60.32] same text True
+OMEGA_TILE_M1=default        decode  65.71 tok/s [64.93, 65.94] same text True

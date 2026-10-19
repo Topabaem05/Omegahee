@@ -350,3 +350,19 @@ E-10에서 잔차 mix 안의 barrier를 줄여도 빨라지지 않았으므로, 
 | 모델 안(의존 dispatch) 기준 m=1, m=2 GEMV 타일 재조정 | 0.3~0.6ms | 마이크로벤치는 독립 dispatch라 모델 안 차이를 놓침 |
 | 행 묶음 attention을 prepare 둘 → attention 둘 순서로 인코딩(동시 실행 늘림), QKV norm과 prepare 합침 | 0.1~0.3ms | |
 | 두 후보 추측(batch 3)으로 빈 단계(약 4%) 줄임 | 0.2~0.4ms | m=3 GEMV 타일 필요 |
+
+### llama.cpp 비교 (참고, 형식이 달라 직접 비교 아님)
+
+다른 작업 세션이 Dory 지원 llama.cpp(`98a74c9`, CPU 버퍼 배치 수정 후)를 같은 기기에서 쟀습니다
+(`docs/dory_speed_20261018.md`, 잠정 표시, Q5_K_M, 128토큰, context 4096). 같은 양자화 형식이 아니므로 토큰당 바이트와
+실효 대역폭으로 나란히 둡니다.
+
+| 엔진 | 형식 | 루프 | 토큰당 가중치 | decode tok/s | 실효 대역폭 |
+|---|---|---|---|---|---|
+| llama.cpp | Q5_K_M | 2 | 4.28GB | 42.76 | 183GB/s |
+| Ω-Hee 순차 | MLX INT4 g64 + INT8 readout | 2 | 3.24GB | 70.58(E-00, 128) | 229GB/s |
+| Ω-Hee 순차 | BF16 | 2 | 10.95GB | 25.15(E-00, 128) | 275GB/s |
+| Ω-Hee wavefront | MLX INT4 g64 + INT8 readout | 2 | (토큰당 약 1루프분) | 85.77(E-08, 128) | — |
+
+같은 형식 비교(예: llama.cpp Q4_0과 Ω-Hee INT4)와 대조 모델(Qwen3.5-4B) 측정은 하지 않았습니다. 디스크 여유가
+19GB(96% 사용)라 대조 모델 다운로드와 변환(약 16GB)을 미뤘습니다.
