@@ -1,0 +1,11 @@
+nvfp4-r8-e12 gsm8k: 179/200 = 89.5%
+nvfp4-r8-e12 humaneval: 142/164 = 86.6%
+nvfp4-r8-e12 mmlu_pro: 213/500 = 42.6%
+nvfp4-r8-e12 long: 18/20 = 90.0%
+nvfp4-r8-e12 suite score 77.17%
+nvfp4-r8-wavefront-e12 gsm8k: 180/200 = 90.0%
+nvfp4-r8-wavefront-e12 humaneval: 140/164 = 85.4%
+nvfp4-r8-wavefront-e12 mmlu_pro: 213/500 = 42.6%
+nvfp4-r8-wavefront-e12 long: 18/20 = 90.0%
+nvfp4-r8-wavefront-e12 suite score 76.99%
+EVAL_QUEUE5_DONE

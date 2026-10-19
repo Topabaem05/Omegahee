@@ -1,0 +1,14 @@
+nvfp4_r4_fp8s            mean KL 0.0452  p95 0.1352  top-1 agree 0.9497  positions 2845
+paused 26300
+E-19-r8-wavefront-a1 L2 per_loop prompt_2048.json: decode 83.36 [82.90, 84.33] tok/s, upper 94.5, efficiency 88.2%, prefill 1414 tok/s
+E-19-r4-wavefront L2 per_loop prompt_128.json: decode 98.59 [98.51, 99.17] tok/s, upper 99.3, efficiency 99.3%, prefill 801 tok/s
+E-19-r4-wavefront L2 per_loop prompt_2048.json: decode 90.98 [90.65, 91.53] tok/s, upper 99.3, efficiency 91.6%, prefill 1416 tok/s
+E-19-r4-wavefront L2 per_loop prompt_16384.json: decode 69.25 [67.29, 69.28] tok/s, upper 99.3, efficiency 69.8%, prefill 1159 tok/s
+E-19-r4-wavefront-b2 L2 per_loop prompt_2048.json: decode 91.72 [90.82, 91.75] tok/s, upper 99.3, efficiency 92.4%, prefill 1424 tok/s
+E-19-r8-wavefront-a2 L2 per_loop prompt_2048.json: decode 84.41 [83.31, 84.53] tok/s, upper 94.5, efficiency 89.3%, prefill 1422 tok/s
+E-19-r4-sequential L2 per_loop prompt_2048.json: decode 69.61 [69.53, 69.62] tok/s, upper 99.3, efficiency 70.1%, prefill 1427 tok/s
+E-19-r8-sequential L2 per_loop prompt_2048.json: decode 66.75 [66.68, 67.05] tok/s, upper 94.5, efficiency 70.7%, prefill 1410 tok/s
+E-19-r4-wavefront-int8kv L2 per_loop prompt_2048.json: decode 87.29 [86.87, 88.48] tok/s, upper 99.3, efficiency 87.9%, prefill 1424 tok/s
+E-19-r4-wavefront-int8kv L2 per_loop prompt_16384.json: decode 72.83 [71.99, 72.90] tok/s, upper 99.3, efficiency 73.4%, prefill 1228 tok/s
+resumed
+E19_DONE

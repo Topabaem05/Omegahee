@@ -1,0 +1,25 @@
+# FP4 E4M3 GEMV microbench by batch rows m, [groups, rows] scales: default one-row tile vs all-rows tile (E-21)
+down m1: sg8_r4_in1_l32_g1 35.915 µs  sg8_r2_in1_l32_g1 37.219 µs  sg4_r4_in1_l32_g1 35.993 µs
+down m2: sg8_r4_in1_l32_g1 46.074 µs  sg8_r4_in2_l32_g1 36.062 µs
+down m3: sg8_r4_in1_l32_g1 60.878 µs  sg8_r4_in3_l32_g1 37.686 µs
+down m4: sg8_r4_in1_l32_g1 78.179 µs  sg8_r4_in4_l32_g1 44.966 µs
+down m6: sg8_r4_in1_l32_g1 113.61 µs  sg8_r4_in6_l32_g1 66.236 µs
+down m8: sg8_r4_in1_l32_g1 149.58 µs  sg8_r4_in8_l32_g1 88.958 µs
+out m1: sg8_r4_in1_l32_g1 20.033 µs  sg8_r2_in1_l32_g1 20.877 µs  sg4_r4_in1_l32_g1 20.049 µs
+out m2: sg8_r4_in1_l32_g1 26.316 µs  sg8_r4_in2_l32_g1 20.262 µs
+out m3: sg8_r4_in1_l32_g1 35.451 µs  sg8_r4_in3_l32_g1 21.393 µs
+out m4: sg8_r4_in1_l32_g1 45.906 µs  sg8_r4_in4_l32_g1 26.070 µs
+out m6: sg8_r4_in1_l32_g1 66.614 µs  sg8_r4_in6_l32_g1 37.582 µs
+out m8: sg8_r4_in1_l32_g1 86.940 µs  sg8_r4_in8_l32_g1 51.039 µs
+qkvg m1: sg8_r4_in1_l32_g1 51.109 µs  sg8_r2_in1_l32_g1 53.065 µs  sg4_r4_in1_l32_g1 51.080 µs
+qkvg m2: sg8_r4_in1_l32_g1 66.766 µs  sg8_r4_in2_l32_g1 51.847 µs
+qkvg m3: sg8_r4_in1_l32_g1 89.282 µs  sg8_r4_in3_l32_g1 53.830 µs
+qkvg m4: sg8_r4_in1_l32_g1 115.20 µs  sg8_r4_in4_l32_g1 65.988 µs
+qkvg m6: sg8_r4_in1_l32_g1 169.88 µs  sg8_r4_in6_l32_g1 91.796 µs
+qkvg m8: sg8_r4_in1_l32_g1 224.06 µs  sg8_r4_in8_l32_g1 117.99 µs
+up m1: sg8_r4_in1_l32_g1 71.296 µs  sg8_r2_in1_l32_g1 73.608 µs  sg4_r4_in1_l32_g1 71.607 µs
+up m2: sg8_r4_in1_l32_g1 93.013 µs  sg8_r4_in2_l32_g1 72.602 µs
+up m3: sg8_r4_in1_l32_g1 124.73 µs  sg8_r4_in3_l32_g1 75.242 µs
+up m4: sg8_r4_in1_l32_g1 160.67 µs  sg8_r4_in4_l32_g1 92.641 µs
+up m6: sg8_r4_in1_l32_g1 232.42 µs  sg8_r4_in6_l32_g1 127.26 µs
+up m8: sg8_r4_in1_l32_g1 305.23 µs  sg8_r4_in8_l32_g1 163.50 µs

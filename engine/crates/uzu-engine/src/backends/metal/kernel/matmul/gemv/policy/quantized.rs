@@ -95,11 +95,11 @@ fn lane_policy(
     }
 }
 
-/// MLX-style (scale and bias) 4-bit group 64 or FP4 group 16 weights with two input rows: one
-/// threadgroup reads each weight once for both rows (the tile family the tuned zero-point routes use).
-/// Measured for MLX 4-bit on Dory decode shapes on an M5 Pro: 1.02-1.07x the one-row time, against
-/// 1.25-1.33x with `lane_default`, which reads the weights once per row.
-pub fn two_row_batch_tile(
+/// MLX-style (scale and bias) 4-bit group 64 weights with two input rows, or FP4 group 16 weights with
+/// two to eight: one threadgroup reads each weight once for all rows (the tile family the tuned
+/// zero-point routes use). Measured for MLX 4-bit on Dory decode shapes on an M5 Pro: 1.02-1.07x the
+/// one-row time, against 1.25-1.33x with `lane_default`, which reads the weights once per row.
+pub fn batch_tile(
     prologue: GemmBPrologueKind,
     bits: u32,
     group: u32,
@@ -109,14 +109,14 @@ pub fn two_row_batch_tile(
     if TILE_OVERRIDE.with(std::cell::Cell::get).is_some() {
         return None;
     }
-    if m != 2 || bits != 4 {
+    if bits != 4 {
         return None;
     }
     match (prologue, group) {
-        (GemmBPrologueKind::ScaleBiasDequant, 64) => Some(GemvTile::quantized_output_tile(2, 16, m, 8, 1)),
-        // FP4 group 16 on Dory shapes: 32 lanes over 32 output rows, 1.01-1.02x the one-row time with the
-        // paired e2m1 decode (the 8-lane tile above: 1.16-1.25x).
-        (GemmBPrologueKind::ScaleFp4Dequant | GemmBPrologueKind::ScaleFp4E4M3Dequant, 16) => {
+        (GemmBPrologueKind::ScaleBiasDequant, 64) if m == 2 => Some(GemvTile::quantized_output_tile(2, 16, m, 8, 1)),
+        // FP4 group 16 on Dory shapes: 32 lanes over 32 output rows. With the paired e2m1 decode, 2 rows
+        // take 1.01-1.02x the one-row time, 3 rows 1.05x and 4 rows 1.3x (`lane_default`: 1.3x, 1.8x, 2.3x).
+        (GemmBPrologueKind::ScaleFp4Dequant | GemmBPrologueKind::ScaleFp4E4M3Dequant, 16) if (2..=8).contains(&m) => {
             Some(GemvTile::quantized_output_tile(8, 32, m, 32, 1))
         },
         _ => None,

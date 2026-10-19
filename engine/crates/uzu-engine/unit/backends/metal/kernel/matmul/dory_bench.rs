@@ -119,6 +119,25 @@ fn bench_dory_gemv_tiles(c: &mut Criterion) {
     sweep_tiles(c, "FP4", 16, QuantizationMethod::ScaleFp4, FP4_SWEEP_TILES, false);
 }
 
+/// FP4 (FP8 scales, [groups, rows]) GEMV tiles for token batches beyond two rows (multi-token wavefront
+/// or draft verification): the default tile against all-rows-at-once tiles of 32 lanes.
+const FP4_BATCH_TILES: &[(u32, u32, u32, u32, u32)] =
+    &[(8, 4, 1, 32, 1), (8, 4, 0, 32, 1), (8, 2, 0, 32, 1), (4, 4, 0, 32, 1)];
+
+#[uzu_bench]
+fn bench_dory_fp4_batches(c: &mut Criterion) {
+    sweep_tiles_with(
+        c,
+        "FP4E4M3",
+        16,
+        QuantizationMethod::ScaleFp4E4M3,
+        FP4_BATCH_TILES,
+        false,
+        &[1, 2, 3, 4, 6, 8],
+        true,
+    );
+}
+
 fn sweep_tiles(
     c: &mut Criterion,
     label: &str,
@@ -127,13 +146,30 @@ fn sweep_tiles(
     tiles: &[(u32, u32, u32, u32, u32)],
     with_readout: bool,
 ) {
+    sweep_tiles_with(c, label, group_size, method, tiles, with_readout, &[2], false);
+}
+
+/// `tiles` with an input row count of 0 take the batch size `m` as their input rows.
+fn sweep_tiles_with(
+    c: &mut Criterion,
+    label: &str,
+    group_size: u32,
+    method: QuantizationMethod,
+    tiles: &[(u32, u32, u32, u32, u32)],
+    with_readout: bool,
+    batches: &[u32],
+    group_output: bool,
+) {
     use crate::backends::metal::kernel::matmul::gemv::{GemvTile, TILE_OVERRIDE};
     let context = crate::tests::util::shared_metal_context();
     let readout = with_readout.then_some(&DORY_READOUT);
     let shapes = DORY_LINEARS.iter().chain(readout);
     for &(layer, k, n) in shapes {
-        for m in [2u32] {
-            let input = QuantInput::<bf16>::new(m, k, n, group_size, 4, method, 7);
+        for &m in batches {
+            let mut input = QuantInput::<bf16>::new(m, k, n, group_size, 4, method, 7);
+            if group_output {
+                input = input.with_group_output();
+            }
             let mut matmul = <<Metal as Backend>::Kernels as Kernels>::MatmulKernel::new(
                 &context,
                 <bf16 as crate::data_type::DataTypeRepr>::data_type(),
@@ -145,7 +181,16 @@ fn sweep_tiles(
             TILE_OVERRIDE.with(|tile| tile.set(None));
             let expected = encode_once(&context, &mut matmul, &mut check_buffers, &input).expect("default tile");
             let mut group = c.benchmark_group(format!("Metal/Kernel/DoryTiles/{label}_{layer}_M{m}"));
+            let mut seen = std::collections::HashSet::new();
             for &(simdgroups, results, input_rows, lanes, group_lanes) in tiles {
+                let input_rows = if input_rows == 0 {
+                    m
+                } else {
+                    input_rows
+                };
+                if !seen.insert((simdgroups, results, input_rows, lanes, group_lanes)) {
+                    continue;
+                }
                 let tile = GemvTile::quantized(simdgroups, results, input_rows, lanes, group_lanes);
                 TILE_OVERRIDE.with(|override_tile| override_tile.set(Some(tile)));
                 let Some(output) = encode_once(&context, &mut matmul, &mut check_buffers, &input) else {
@@ -231,14 +276,14 @@ fn dory_gemv_tile_accuracy() {
 /// bytes cover exponents 4..=9; these add the subnormals and the top exponent.
 const E4M3_SCALE_BANDS: &[(u8, u8, f32)] = &[(0x01, 7, 1000.0), (0x70, 15, 0.01)];
 
-/// FP4 (e2m1, group 16) on the Metal GEMV (m = 1, 2) and the dequantize + GEMM path (m = 16) against
+/// FP4 (e2m1, group 16) on the Metal GEMV (m = 1 to 8) and the dequantize + GEMM path (m = 16) against
 /// the CPU reference, with BF16 or FP8 E4M3 group scales and both quantization parameter layouts.
 #[uzu_engine_macros::uzu_test]
 fn dory_fp4_matmul_matches_cpu() {
     use crate::backends::common::kernel::matmul::QuantParamsLayout;
     let context = crate::tests::util::shared_metal_context();
     for &(layer, k, n) in &[DORY_LINEARS[0], DORY_LINEARS[3], ("small", 512, 96)] {
-        for (m, method) in [1u32, 2, 16]
+        for (m, method) in [1u32, 2, 3, 4, 8, 16]
             .into_iter()
             .flat_map(|m| [QuantizationMethod::ScaleFp4, QuantizationMethod::ScaleFp4E4M3].map(|method| (m, method)))
         {

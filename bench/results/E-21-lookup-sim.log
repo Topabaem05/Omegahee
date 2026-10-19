@@ -1,0 +1,5 @@
+bench128   sequential k=2 1.590 | sequential k=3 1.718 | wavefront k=0 n>=1 0.955 | wavefront k=1 n>=3 1.213 | wavefront k=4 n>=3 1.414
+bench2048  sequential k=2 1.399 | sequential k=3 1.446 | wavefront k=0 n>=1 0.955 | wavefront k=1 n>=3 1.045 | wavefront k=4 n>=3 1.128
+bench16384 sequential k=2 1.299 | sequential k=3 1.362 | wavefront k=0 n>=1 0.955 | wavefront k=1 n>=3 0.985 | wavefront k=4 n>=3 1.000
+gsm8k      sequential k=2 1.484 | sequential k=3 1.553 | wavefront k=0 n>=1 0.962 | wavefront k=1 n>=3 0.996 | wavefront k=4 n>=3 1.022
+humaneval  sequential k=2 1.826 | sequential k=3 2.022 | wavefront k=0 n>=1 0.962 | wavefront k=1 n>=3 1.269 | wavefront k=4 n>=3 1.637

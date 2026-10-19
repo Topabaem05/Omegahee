@@ -1,0 +1,13 @@
+paused 52540
+quiet (idle 95.84%)
+E-20r-before-wavefront-a1 L2 per_loop prompt_2048.json: decode 91.81 [91.61, 91.95] tok/s, upper 99.3, efficiency 92.5%, prefill 1427 tok/s
+E-20r-phased-wavefront L2 per_loop prompt_128.json: decode 101.06 [100.94, 101.17] tok/s, upper 99.3, efficiency 101.8%, prefill 813 tok/s
+E-20r-phased-wavefront L2 per_loop prompt_2048.json: decode 92.02 [91.40, 92.19] tok/s, upper 99.3, efficiency 92.7%, prefill 1419 tok/s
+E-20r-phased-wavefront L2 per_loop prompt_16384.json: decode 69.38 [69.12, 69.46] tok/s, upper 99.3, efficiency 69.9%, prefill 1158 tok/s
+E-20r-phased-wavefront-b2 L2 per_loop prompt_2048.json: decode 92.03 [91.96, 92.14] tok/s, upper 99.3, efficiency 92.7%, prefill 1426 tok/s
+E-20r-before-wavefront-a2 L2 per_loop prompt_2048.json: decode 91.91 [91.67, 92.03] tok/s, upper 99.3, efficiency 92.6%, prefill 1427 tok/s
+E-20r-phased-sequential L2 per_loop prompt_2048.json: decode 69.65 [69.44, 69.67] tok/s, upper 99.3, efficiency 70.2%, prefill 1427 tok/s
+E-20r-before-sequential L2 per_loop prompt_2048.json: decode 69.65 [68.06, 69.72] tok/s, upper 99.3, efficiency 70.2%, prefill 1424 tok/s
+E-20r-phased-wavefront-int8kv L2 per_loop prompt_16384.json: decode 73.15 [71.76, 73.22] tok/s, upper 99.3, efficiency 73.7%, prefill 1225 tok/s
+resumed
+E20_DONE

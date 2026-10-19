@@ -79,8 +79,7 @@ CONSTRAINT(
       (BITS == 4 && GEMV_TILE(16, 16, 4) && INPUT_ROWS(3, 6)) ||
       (BITS == 4 && GEMV_TILE(8, 8, 2) && INPUT_ROW_TILE == 2))) ||
     ((B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant || B_PROLOGUE == GemmBPrologueKind::ScaleFp4E4M3Dequant) &&
-     GROUP_SIZE == 16 && INPUT_ROW_TILE == 2 &&
-     (GEMV_TILE(16, 8, 2) || GEMV_TILE(32, 32, 8))))
+     GROUP_SIZE == 16 && ((INPUT_ROW_TILE == 2 && GEMV_TILE(16, 8, 2)) || (INPUT_ROWS(2, 8) && GEMV_TILE(32, 32, 8)))))
 
 // Keep only selector-reachable geometry families.
 CONSTRAINT(

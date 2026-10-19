@@ -1,0 +1,28 @@
+# wavefront 2K, nvfp4-r4-fp8s, OMEGA_ABLATE (outputs garbage, guesses forced to hit), E-19 engine
+prompt_2048.json mask   0 baseline                       94.70 pass/s  10.56 ms/pass  saved  0.00 ms  tokens [256, 256, 256]
+prompt_2048.json mask   1 attention core                115.07 pass/s   8.69 ms/pass  saved  1.87 ms  tokens [256, 256, 256]
+prompt_2048.json mask   2 qkv norm                       96.47 pass/s  10.37 ms/pass  saved  0.19 ms  tokens [256, 256, 256]
+prompt_2048.json mask   4 gate norm                      95.86 pass/s  10.43 ms/pass  saved  0.13 ms  tokens [256, 256, 256]
+prompt_2048.json mask   8 swiglu norm                    97.46 pass/s  10.26 ms/pass  saved  0.30 ms  tokens [256, 256, 256]
+prompt_2048.json mask  16 residual mix                  100.35 pass/s   9.97 ms/pass  saved  0.59 ms  tokens [256, 256, 256]
+prompt_2048.json mask 128 row-group copies               95.51 pass/s  10.47 ms/pass  saved  0.09 ms  tokens [256, 256, 256]
+prompt_2048.json mask 158 all small (2+4+8+16+128)      105.73 pass/s   9.46 ms/pass  saved  1.10 ms  tokens [256, 256, 256]
+prompt_2048.json mask  32 linear GEMVs                  326.21 pass/s   3.07 ms/pass  saved  7.49 ms  tokens [256, 256, 256]
+prompt_2048.json mask  64 readout                       101.50 pass/s   9.85 ms/pass  saved  0.71 ms  tokens [256, 256, 256]
+prompt_2048.json mask   0 baseline                       94.79 pass/s  10.55 ms/pass  saved  0.01 ms  tokens [256, 256, 256]
+# in-model tile sweep (OMEGA_TILE_M1 / OMEGA_TILE_M2 = simdgroups,results,input rows,lanes,group lanes), wavefront 2K
+OMEGA_TILE_M1=default        decode  92.10 tok/s [92.03, 92.15] same text True
+OMEGA_TILE_M1=4,4,1,32,1     decode  92.07 tok/s [92.07, 92.12] same text True
+OMEGA_TILE_M1=2,4,1,32,1     decode  91.83 tok/s [91.57, 91.92] same text True
+OMEGA_TILE_M1=8,2,1,32,1     decode  91.46 tok/s [91.20, 91.49] same text True
+OMEGA_TILE_M1=4,2,1,32,1     decode  90.55 tok/s [89.63, 90.68] same text True
+OMEGA_TILE_M1=4,8,1,32,1     decode  89.10 tok/s [88.97, 89.15] same text True
+OMEGA_TILE_M1=2,2,1,32,1     decode  90.09 tok/s [89.44, 90.19] same text True
+OMEGA_TILE_M1=default        decode  92.07 tok/s [91.96, 92.07] same text True
+OMEGA_TILE_M2=default        decode  92.08 tok/s [92.08, 92.14] same text True
+OMEGA_TILE_M2=4,4,2,32,1     decode  91.77 tok/s [90.84, 92.10] same text True
+OMEGA_TILE_M2=8,2,2,32,1     decode  90.36 tok/s [90.36, 90.36] same text True
+OMEGA_TILE_M2=4,8,2,32,1     decode  76.74 tok/s [76.71, 76.75] same text True
+OMEGA_TILE_M2=4,2,2,32,1     decode  88.30 tok/s [87.79, 88.34] same text True
+OMEGA_TILE_M2=2,8,2,8,1      decode  81.52 tok/s [81.52, 81.59] same text True
+OMEGA_TILE_M2=default        decode  92.13 tok/s [92.08, 92.17] same text True

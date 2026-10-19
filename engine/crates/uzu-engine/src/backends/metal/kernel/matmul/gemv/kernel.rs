@@ -77,8 +77,7 @@ impl GemvSpecialization {
             && bf16_io
             && gemm_b_layout != GemmBLayout::MxuTiled
             && shape.k.is_multiple_of(512)
-            && let Some(tile) =
-                policy::two_row_batch_tile(shape.b_prologue, bits, shape.b_group_size.unwrap_or(0), shape.m)
+            && let Some(tile) = policy::batch_tile(shape.b_prologue, bits, shape.b_group_size.unwrap_or(0), shape.m)
         {
             Some(tile)
         } else if is_quant {
