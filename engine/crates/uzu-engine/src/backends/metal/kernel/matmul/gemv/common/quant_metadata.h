@@ -43,6 +43,11 @@ public:
       } else if constexpr (B_PROLOGUE == GemmBPrologueKind::ScaleSymmetricDequant) {
         origin[R] = FLOAT_OFFSET + float(symmetric_zero_point<BITS>());
         bias[R] = 0.0f;
+      } else if constexpr (B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant) {
+        // decode_fp4 yields e2m1 * 2^-14.
+        scale[R] *= FP4_E2M1_HALF_SCALE;
+        origin[R] = 0.0f;
+        bias[R] = 0.0f;
       } else {
         static_assert(B_PROLOGUE == GemmBPrologueKind::ScaleBiasDequant);
         origin[R] = FLOAT_OFFSET;
@@ -58,7 +63,11 @@ public:
       uint row,
       thread float (&values)[QuantChunk<BITS>::VALUES]
   ) const thread {
-    QuantChunk<BITS>::decode(words, chunk, values, origin[row], signed_codes);
+    if constexpr (B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant) {
+      QuantChunk<BITS>::decode_fp4(words, chunk, values);
+    } else {
+      QuantChunk<BITS>::decode(words, chunk, values, origin[row], signed_codes);
+    }
   }
 
   METAL_FUNC void fold(

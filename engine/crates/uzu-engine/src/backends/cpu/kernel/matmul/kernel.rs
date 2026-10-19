@@ -2,7 +2,7 @@ use crate::{
     backends::{
         common::{
             Backend, BufferCpuAccessible, BufferMut, BufferRef, Kernels,
-            gpu_types::quantization::QuantizationMode,
+            gpu_types::{quantization::QuantizationMode, quantization_method::FP4_E2M1_VALUES},
             kernel::{
                 ActivationTransform, TensorAddBiasKernel,
                 matmul::{Int8CodeLayout, MatmulA, MatmulArguments, MatmulKernel},
@@ -220,6 +220,7 @@ impl MatmulKernel for MatmulCpuKernel {
                                     bits,
                                     group_size,
                                     signed_codes,
+                                    fp4,
                                 } => {
                                     let pack_factor = 32 / *bits;
                                     let weight_linear_index = b_col * k_u + inner;
@@ -238,30 +239,34 @@ impl MatmulKernel for MatmulCpuKernel {
                                     let metadata_index = b_col * scale_strides.output_stride as usize
                                         + group_index * scale_strides.group_stride as usize;
                                     let scale = read_f32(scales.as_ptr(), weights_data_type, metadata_index);
-                                    let midpoint = (1u32 << (bits - 1)) as f32;
-                                    let zero_point = zero_points.as_ref().map(|(zp, strides)| {
-                                        let zero_point_index = b_col * strides.output_stride as usize
-                                            + group_index * strides.group_stride as usize;
-                                        if *bits == 4 {
-                                            let byte_index = zero_point_index / 2;
-                                            let byte_value = *zp.as_ptr().add(byte_index);
-                                            if zero_point_index.is_multiple_of(2) {
-                                                (byte_value & 0x0F) as f32
-                                            } else {
-                                                ((byte_value >> 4) & 0x0F) as f32
-                                            }
-                                        } else {
-                                            *zp.as_ptr().add(zero_point_index) as f32
-                                        }
-                                    });
-                                    let bias_term = if let Some(zp) = zero_point {
-                                        -scale * zp
-                                    } else if let Some(b) = biases {
-                                        read_f32(b.as_ptr(), weights_data_type, metadata_index)
+                                    if *fp4 {
+                                        scale * FP4_E2M1_VALUES[usize::from(weight_code)]
                                     } else {
-                                        -scale * midpoint
-                                    };
-                                    scale * quantized_value + bias_term
+                                        let midpoint = (1u32 << (bits - 1)) as f32;
+                                        let zero_point = zero_points.as_ref().map(|(zp, strides)| {
+                                            let zero_point_index = b_col * strides.output_stride as usize
+                                                + group_index * strides.group_stride as usize;
+                                            if *bits == 4 {
+                                                let byte_index = zero_point_index / 2;
+                                                let byte_value = *zp.as_ptr().add(byte_index);
+                                                if zero_point_index.is_multiple_of(2) {
+                                                    (byte_value & 0x0F) as f32
+                                                } else {
+                                                    ((byte_value >> 4) & 0x0F) as f32
+                                                }
+                                            } else {
+                                                *zp.as_ptr().add(zero_point_index) as f32
+                                            }
+                                        });
+                                        let bias_term = if let Some(zp) = zero_point {
+                                            -scale * zp
+                                        } else if let Some(b) = biases {
+                                            read_f32(b.as_ptr(), weights_data_type, metadata_index)
+                                        } else {
+                                            -scale * midpoint
+                                        };
+                                        scale * quantized_value + bias_term
+                                    }
                                 },
                             };
                             accumulator += a_value * b_value;

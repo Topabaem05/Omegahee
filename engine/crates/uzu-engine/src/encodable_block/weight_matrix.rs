@@ -50,6 +50,9 @@ pub fn parse_spec<B: Backend>(spec: &AnyWeightMatrixSpec) -> Result<ParsedWeight
                 },
             )),
         ),
+        AnyWeightMatrixSpec::MicrofloatSpec(spec) => {
+            (spec.layout.clone(), Some((spec.bits, spec.group_size, QuantizationMethod::ScaleFp4)))
+        },
         spec => return Err(WeightMatrixError::UnsupportedConfiguration(format!("{spec:?}"))),
     };
     let quantization = match quantized {
@@ -154,6 +157,7 @@ impl<B: Backend> WeightMatrix<B> {
                 info.mode.storage_type(),
             )?),
             QuantizationMethod::ScaleSymmetric => QuantizedCorrection::Symmetric,
+            QuantizationMethod::ScaleFp4 => QuantizedCorrection::Fp4,
         };
 
         Ok(Self {

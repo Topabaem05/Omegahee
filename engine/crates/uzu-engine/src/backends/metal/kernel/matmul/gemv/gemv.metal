@@ -35,8 +35,9 @@ VARIANTS(
     GemmBPrologueKind::FullPrecision,
     GemmBPrologueKind::ScaleBiasDequant,
     GemmBPrologueKind::ScaleZeroPointDequant,
-    GemmBPrologueKind::ScaleSymmetricDequant)
-VARIANTS(GROUP_SIZE, 0, 32, 64)
+    GemmBPrologueKind::ScaleSymmetricDequant,
+    GemmBPrologueKind::ScaleFp4Dequant)
+VARIANTS(GROUP_SIZE, 0, 16, 32, 64)
 VARIANTS(BITS, 0, 4, 8)
 VARIANTS(K_SPLIT, 1, 2, 4, 8)
 VARIANTS(INPUT_ALIGNED, false, true)
@@ -52,6 +53,9 @@ CONSTRAINT(B_PROLOGUE == GemmBPrologueKind::FullPrecision || BT != "float")
 CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleZeroPointDequant || BITS == 4)
 CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleSymmetricDequant || BITS == 8)
 CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleBiasDequant || BITS == 4)
+CONSTRAINT(B_PROLOGUE != GemmBPrologueKind::ScaleFp4Dequant || BITS == 4)
+// Group 16 exists only for FP4 (NVFP4 blocks).
+CONSTRAINT(GROUP_SIZE != 16 || B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant)
 CONSTRAINT(BITS == 0 || K_SPLIT == 1)
 CONSTRAINT(BITS != 0 || (INPUT_ROW_TILE == 1 && REDUCTION_LANES == 32 && NUM_SIMDGROUPS == 8 && GROUP_LANES == 1))
 CONSTRAINT(INPUT_ROW_TILE != 1 || REDUCTION_LANES == 32)
@@ -65,10 +69,12 @@ CONSTRAINT(
 
 CONSTRAINT(
     INPUT_ROW_TILE == 1 ||
-    (GROUP_SIZE == 64 &&
+    (GROUP_SIZE == 64 && B_PROLOGUE != GemmBPrologueKind::ScaleFp4Dequant &&
      ((GEMV_TILE(16, 8, 2) && INPUT_ROWS(2, 7)) ||
       (BITS == 4 && GEMV_TILE(16, 16, 4) && INPUT_ROWS(3, 6)) ||
-      (BITS == 4 && GEMV_TILE(8, 8, 2) && INPUT_ROW_TILE == 2))))
+      (BITS == 4 && GEMV_TILE(8, 8, 2) && INPUT_ROW_TILE == 2))) ||
+    (B_PROLOGUE == GemmBPrologueKind::ScaleFp4Dequant && GROUP_SIZE == 16 && GEMV_TILE(16, 8, 2) &&
+     INPUT_ROW_TILE == 2))
 
 // Keep only selector-reachable geometry families.
 CONSTRAINT(
@@ -99,7 +105,8 @@ CONSTRAINT(BITS != 8 || (GROUP_SIZE / GROUP_LANES) % 8 == 0)
 CONSTRAINT(BITS != 0 || REDUCTION_LANES == 32)
 CONSTRAINT(
     BITS == 0 || INPUT_ROW_TILE > 1 ||
-    (BITS == 4 && ((GROUP_SIZE == 32 && GROUP_LANES == 2) || (GROUP_SIZE == 64 && GROUP_LANES == 4))) ||
+    (BITS == 4 && ((GROUP_SIZE == 16 && GROUP_LANES == 1) || (GROUP_SIZE == 32 && GROUP_LANES == 2) ||
+                   (GROUP_SIZE == 64 && GROUP_LANES == 4))) ||
     (BITS == 8 && ((GROUP_SIZE == 32 && GROUP_LANES == 4) || (GROUP_SIZE == 64 && GROUP_LANES == 8))))
 KERNEL(Gemv)(
     const device uint32_t* b,

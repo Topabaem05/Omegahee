@@ -1,5 +1,6 @@
 #include <metal_stdlib>
 #include "../common/dsl.h"
+#include "../common/fp4.h"
 #include "../common/packed.h"
 #include "../generated/d4s4.h"
 #include "../generated/embedding.h"
@@ -72,7 +73,9 @@ PUBLIC KERNEL(InputEmbeddingLookup)(
     } else {
       bias = -scale * (is_u4 ? 8.0f : 128.0f);
     }
-    loaded = float(T((scale * code + bias) * input_scale));
+    const float value =
+        quantization_method == QuantizationMethod::ScaleFp4 ? scale * fp4_e2m1_value(uint(code)) : scale * code + bias;
+    loaded = float(T(value * input_scale));
   } else {
     const uint ladder_index = read_packed<4>(
         ladder_indices,

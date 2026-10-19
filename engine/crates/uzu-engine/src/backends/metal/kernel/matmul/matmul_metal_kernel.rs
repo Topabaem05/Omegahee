@@ -4,11 +4,13 @@ use crate::{
     backends::{
         common::{
             Backend, BufferMut, BufferRef, CommandBufferEncoding,
+            gpu_types::gemm::GemmBPrologueKind,
             kernel::{
-                ActivationQuantization,
+                ActivationQuantization, Fp4DequantizeKernel,
                 activation_transform::ACTIVATION_SCALE_GROUP_SIZE,
                 matmul::{
-                    ActivationFormat, Int8CodeLayout, MatmulArguments, MatmulKernel, MatmulShape, QuantParamsLayout,
+                    ActivationFormat, Int8CodeLayout, MatmulArguments, MatmulB, MatmulKernel, MatmulShape,
+                    QuantParamsLayout,
                 },
             },
         },
@@ -18,13 +20,16 @@ use crate::{
             context::MetalContext,
             error::MetalError,
             gpu_types::gemm::{GemmBLayout, GemmTiling},
-            kernel::matmul::{
-                GemmKernel, MatmulMetalError,
-                gemm::{self, GemmPlan, GemmProblem},
-                gemv::{GemvKernel, GemvSpecialization},
-                matmul_dispatch::MatmulDispatch,
-                matmul_output_work::MatmulOutputWork,
-                qmv::{self, QmvRoute},
+            kernel::{
+                Fp4DequantizeMetalKernel,
+                matmul::{
+                    GemmKernel, MatmulMetalError,
+                    gemm::{self, GemmPlan, GemmProblem},
+                    gemv::{GemvKernel, GemvSpecialization},
+                    matmul_dispatch::MatmulDispatch,
+                    matmul_output_work::MatmulOutputWork,
+                    qmv::{self, QmvRoute},
+                },
             },
         },
     },
@@ -35,13 +40,17 @@ pub struct MatmulMetalKernel {
     gemv: GemvKernel,
     pub gemm: GemmKernel,
     output_work: MatmulOutputWork,
+    /// Expands FP4 weights to dense rows for GEMM (prefill); GEMM has no FP4 prologue.
+    fp4_dequantize: Option<Fp4DequantizeMetalKernel>,
     weights_data_type: DataType,
     input_data_type: DataType,
     output_data_type: DataType,
 }
 
 pub fn supports_integer_right_operand(shape: &MatmulShape) -> bool {
-    matches!((shape.b_bits, shape.signed_codes), (Some(4), _) | (Some(8), true))
+    // FP4 codes are not integers; INT8 activation GEMMs cannot use them.
+    shape.b_prologue != GemmBPrologueKind::ScaleFp4Dequant
+        && matches!((shape.b_bits, shape.signed_codes), (Some(4), _) | (Some(8), true))
 }
 
 impl MatmulMetalKernel {
@@ -179,6 +188,7 @@ impl MatmulKernel for MatmulMetalKernel {
             gemv,
             gemm,
             output_work,
+            fp4_dequantize: None,
             weights_data_type,
             input_data_type,
             output_data_type,
@@ -280,7 +290,90 @@ impl MatmulKernel for MatmulMetalKernel {
             MatmulDispatch::Gemm(plan) => plan,
         };
 
+        if let MatmulB::Quantized(quantized) = &arguments.b
+            && quantized.prologue() == GemmBPrologueKind::ScaleFp4Dequant
+        {
+            return self.encode_fp4_gemm(arguments, command_buffer);
+        }
         self.gemm.encode_plan(arguments, plan, &self.output_work, command_buffer)
+    }
+}
+
+impl MatmulMetalKernel {
+    /// GEMM with FP4 weights: expand them to a dense scratch matrix, then run the dense GEMM.
+    fn encode_fp4_gemm(
+        &mut self,
+        arguments: MatmulArguments<
+            '_,
+            Metal,
+            impl BufferRef<Backend = Metal>,
+            impl BufferRef<Backend = Metal>,
+            impl BufferMut<Backend = Metal>,
+            impl BufferRef<Backend = Metal>,
+        >,
+        command_buffer: &mut MetalCommandBufferEncoding,
+    ) -> Result<(), MatmulMetalError> {
+        let MatmulArguments {
+            a,
+            b,
+            b_leading_dimension,
+            b_transpose,
+            output,
+            gather_indices,
+            m,
+            n,
+            k,
+        } = arguments;
+        let MatmulB::Quantized(quantized) = b else {
+            unreachable!("checked by the caller");
+        };
+        if !b_transpose || b_leading_dimension.is_some() {
+            return Err(MatmulMetalError::UnsupportedLayout {
+                path: "Fp4Gemm",
+            });
+        }
+        let kernel = match &mut self.fp4_dequantize {
+            Some(kernel) => kernel,
+            slot @ None => slot.insert(
+                Fp4DequantizeMetalKernel::new(command_buffer.context(), self.weights_data_type)
+                    .map_err(MatmulMetalError::BackendError)?,
+            ),
+        };
+        let mut dense = command_buffer
+            .allocate_scratch(n as usize * k as usize * self.weights_data_type.size_in_bytes())
+            .map_err(MatmulMetalError::BackendError)?;
+        let strides = quantized.params.scale_strides();
+        kernel.encode(
+            quantized.codes,
+            quantized.scales,
+            &mut dense,
+            n,
+            k / 2,
+            quantized.group_size,
+            strides.output_stride,
+            strides.group_stride,
+            command_buffer,
+        );
+        let dense_arguments = MatmulArguments {
+            a,
+            b: MatmulB::FullPrecision {
+                b: &dense,
+            },
+            b_leading_dimension: None,
+            b_transpose: true,
+            output,
+            gather_indices,
+            m,
+            n,
+            k,
+        };
+        let shape = MatmulShape::from_arguments(&dense_arguments);
+        match self.select_dispatch(&shape, GemmBLayout::RowMajor, command_buffer.context()) {
+            MatmulDispatch::Gemv(gemv) => self.gemv.encode(dense_arguments, gemv, &self.output_work, command_buffer),
+            MatmulDispatch::Gemm(plan) => {
+                self.gemm.encode_plan(dense_arguments, plan, &self.output_work, command_buffer)
+            },
+        }
     }
 }
 

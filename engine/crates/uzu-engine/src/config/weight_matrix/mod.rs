@@ -4,6 +4,7 @@ pub mod d4s4_spec;
 pub mod full_precision_spec;
 pub mod hybrid_spec;
 pub mod int_spec;
+pub mod microfloat_spec;
 pub mod mlx_spec;
 
 #[uzu_config]
@@ -17,6 +18,7 @@ pub enum Layout {
     full_precision_spec::FullPrecisionSpec,
     hybrid_spec::HybridSpec,
     int_spec::IntSpec,
+    microfloat_spec::MicrofloatSpec,
     mlx_spec::MLXSpec,
     d4s4_spec::D4S4Spec
 )]

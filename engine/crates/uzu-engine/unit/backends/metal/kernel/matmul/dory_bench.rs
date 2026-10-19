@@ -68,6 +68,7 @@ fn bench_dory_layers(c: &mut Criterion) {
     bench_dory_shapes(c, "ScaleBias_BF16_gs32_4b", DORY_LINEARS, 32, 4, QuantizationMethod::ScaleBias);
     bench_dory_shapes(c, "Sym_BF16_gs64_8b", &[DORY_READOUT], 64, 8, QuantizationMethod::ScaleSymmetric);
     bench_dory_shapes(c, "Sym_BF16_gs64_8b_linears", DORY_LINEARS, 64, 8, QuantizationMethod::ScaleSymmetric);
+    bench_dory_shapes(c, "Fp4_BF16_gs16_4b", DORY_LINEARS, 16, 4, QuantizationMethod::ScaleFp4);
     bench_dory_shapes(c, "ScaleBias_BF16_gs64_4b_readout", &[DORY_READOUT], 64, 4, QuantizationMethod::ScaleBias);
 }
 
@@ -186,6 +187,40 @@ fn dory_gemv_tile_accuracy() {
                 sum_error / reference.len() as f32,
                 scale
             );
+        }
+    }
+}
+
+/// FP4 (e2m1, group 16) on the Metal GEMV (m = 1, 2) and the dequantize + GEMM path (m = 16) against
+/// the CPU reference, with both quantization parameter layouts.
+#[uzu_engine_macros::uzu_test]
+fn dory_fp4_matmul_matches_cpu() {
+    use crate::backends::common::kernel::matmul::QuantParamsLayout;
+    let context = crate::tests::util::shared_metal_context();
+    for &(layer, k, n) in &[DORY_LINEARS[0], DORY_LINEARS[3], ("small", 512, 96)] {
+        for m in [1u32, 2, 16] {
+            for params_layout in [QuantParamsLayout::OutputGroup, QuantParamsLayout::GroupOutput] {
+                let mut input = QuantInput::<bf16>::new(m, k, n, 16, 4, QuantizationMethod::ScaleFp4, 5);
+                input.params_layout = params_layout;
+                let reference = crate::tests::matmul::quant::run_quant_cpu::<bf16>(&input);
+                let mut matmul = <<Metal as Backend>::Kernels as Kernels>::MatmulKernel::new(
+                    &context,
+                    <bf16 as crate::data_type::DataTypeRepr>::data_type(),
+                    <bf16 as crate::data_type::DataTypeRepr>::data_type(),
+                    <bf16 as crate::data_type::DataTypeRepr>::data_type(),
+                )
+                .unwrap();
+                let mut buffers = QuantBuffers::<Metal, bf16>::allocate(&context, &input);
+                let output = encode_once(&context, &mut matmul, &mut buffers, &input).expect("encode");
+                let scale = reference.iter().map(|value| f32::from(*value).abs()).fold(0.0f32, f32::max);
+                let max_error = reference
+                    .iter()
+                    .zip(&output)
+                    .map(|(a, b)| (f32::from(*a) - f32::from(*b)).abs())
+                    .fold(0.0f32, f32::max);
+                eprintln!("FP4 {layer} m{m} {params_layout:?}: max error {max_error:.3e} (output max {scale:.3e})");
+                assert!(max_error <= scale * 2e-2 + 1e-3, "FP4 {layer} m{m} {params_layout:?} mismatch: {max_error}");
+            }
         }
     }
 }

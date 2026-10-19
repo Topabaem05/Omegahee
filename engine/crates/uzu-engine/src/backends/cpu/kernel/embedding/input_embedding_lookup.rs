@@ -5,8 +5,11 @@ use uzu_engine_macros::kernel;
 use crate::{
     backends::{
         common::gpu_types::{
-            d4s4, embedding::EmbeddingTableKind, hadamard_order::HADAMARD_TRANSFORM_BLOCK_SIZE,
-            quantization::QuantizationMode, quantization_method::QuantizationMethod,
+            d4s4,
+            embedding::EmbeddingTableKind,
+            hadamard_order::HADAMARD_TRANSFORM_BLOCK_SIZE,
+            quantization::QuantizationMode,
+            quantization_method::{FP4_E2M1_VALUES, QuantizationMethod},
         },
         cpu::kernel::activation_transform::hadamard_transform,
     },
@@ -104,9 +107,14 @@ pub fn input_embedding_lookup<T: DataTypeRepr + Float>(
                             };
                             -scale * midpoint
                         },
+                        QuantizationMethod::ScaleFp4 => 0.0,
+                    };
+                    let value = match quantization_method {
+                        QuantizationMethod::ScaleFp4 => scale * FP4_E2M1_VALUES[code as usize],
+                        _ => scale * code + bias,
                     };
                     // Ordinary quantization rounds to T before the transform.
-                    T::from((scale * code + bias) * input_scale).unwrap().to_f32().unwrap()
+                    T::from(value * input_scale).unwrap().to_f32().unwrap()
                 },
                 EmbeddingTableKind::D4S4 => {
                     let row_scales = scales.expect("D4S4 lookup requires row scales");

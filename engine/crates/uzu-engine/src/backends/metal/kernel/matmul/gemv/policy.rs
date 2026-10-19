@@ -6,7 +6,7 @@ mod quantized;
 
 #[cfg(test)]
 pub(crate) use quantized::TILE_OVERRIDE;
-pub(super) use quantized::{gathered_tile, scale_bias_batch_tile, select as quantized_tile};
+pub(super) use quantized::{gathered_tile, select as quantized_tile, two_row_batch_tile};
 
 // Full-precision GEMV accumulates four K values per SIMD lane, so one full
 // vectorized K block is 4 * 32 lanes.

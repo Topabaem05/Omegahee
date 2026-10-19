@@ -42,6 +42,7 @@
 | E-08 | MLX(ScaleBias) INT4 g64 m=2 GEMV에 입력 2행 타일(2 simdgroup, 출력 16행, lane 8) | batch 2가 가중치를 한 번만 읽음 | wavefront INT4 78.44 | wavefront INT4 82.27 [81.42, 82.35] (readout INT4: 83.78) | (이 커밋) | 채택(GEMV 정확도 동일, +4.9%) |
 | E-09 | query scale이 있는 attention의 INT8 KV(전체 attention 9층), `OMEGA_INT8_KV=1` | 16K에서 전체 attention KV 읽기 절반 | wavefront INT4 r4 2K 83.99 / 16K 63.13 | 2K 83.01 [82.08, 84.05] / 16K 69.78 [69.07, 71.45] | (이 커밋) | 16K +10.5%(16K/2K 75%→84%), parity 근사 오차 증가, 품질 묶음 판정 대기 |
 | E-10 | 잔차 mix의 두 내부 norm 합을 reduction 한 번으로(barrier 9→6, 출력 비트 동일) | 단일 threadgroup 커널의 barrier 지연 | wavefront INT4 r4 83.79(ABBA 평균) | 83.84(ABBA 평균) | (기록만) | 기각(차이 없음, 되돌림) |
+| E-12 | 공식 NVFP4 부호를 엔진에서 직접 실행(FP4 GEMV, prefill은 BF16 전개 후 GEMM), 그룹 16 BF16 스케일 | INT4 바이트로 반복 층 INT8 혼합 품질 | 혼합(반복 층 INT8) 48.17 / wavefront 61.69 | 순차 60.72 [60.46, 60.88] / wavefront 69.07 [68.18, 69.31] | (이 커밋) | KL 0.0428(혼합 0.044, INT4 0.135), 품질 묶음 측정 중 |
 
 ### 기준선 전체 (E-00, 2루프 per_loop, 워밍업 제외 5회 중앙값 [최소, 최대])
 
@@ -416,3 +417,32 @@ BF16(원래 정밀도)입니다.
 
 도구: `tools/omega_convert.py --spec-rule`(행렬별 형식), `tools/nvfp4_dequant.py`(ModelOpt NVFP4 → BF16 checkout,
 `--rtn-from`으로 RTN 비교, `--check`로 값 확인).
+
+### 품질 묶음: 반복 층 INT8 혼합
+
+| 변형 | GSM8K | HumanEval | MMLU-Pro | 16K 검색 | 묶음 | BF16 대비 |
+|---|---|---|---|---|---|---|
+| 혼합: 반복 층 INT8, 입력·출력 INT4 g64, readout INT8 | 88.5 | 86.6 | 42.0 | 90.0 | 76.77 | 97.8% |
+
+KL 0.044인 변형이 1차 품질 조건(97%)을 넘었습니다. 같은 KL의 공식 NVFP4 값으로 4비트 실행 경로를 만들었습니다(E-12).
+
+### E-12 NVFP4 실행 경로 (경로 B)
+
+- 형식: `MicrofloatSpec`(bits 4, group 16, `nvfp4`, `output_input`). 부호는 U8 [행, 열/2](바이트 하나에 두 개, 아래
+  니블 먼저), 스케일은 BF16 [그룹, 행]으로 FP8 E4M3 블록 스케일과 FP32 텐서 스케일을 곱해 접은 값입니다. 융합
+  행렬(qkvg = q, k, v, g; up = up, gate)은 원래 텐서마다 텐서 스케일이 다르므로 BF16로 접어야 손실이 없습니다
+  (E4M3로 다시 맞추면 블록 스케일에 최대 약 6% 오차).
+- 엔진: `QuantizationMethod::ScaleFp4`, `GemmBPrologueKind::ScaleFp4Dequant`. GEMV는 그룹 16 변형과 e2m1 해독을
+  더했고, GEMM(prefill)은 FP4 행렬을 BF16 scratch로 전개(`Fp4Dequantize`)한 뒤 기존 BF16 GEMM을 씁니다. INT8 활성값
+  GEMM 경로는 FP4에서 끕니다. CPU 기준 구현과 임베딩 조회도 지원합니다.
+- 변환: `tools/nvfp4_dequant.py`(NVFP4 → BF16 checkout) → `tools/omega_convert.py`(기반 모델) →
+  `tools/nvfp4_to_omega.py`(선형층 144개를 공식 부호로 교체). NVFP4 체크포인트의 BF16 텐서(α, 스케일, 임베딩) 219개 중
+  170개가 BF16 체크포인트와 1~2ulp 다르므로, 기반 모델도 NVFP4 체크포인트에서 만듭니다.
+- 검증: GEMV(m=1, 2)와 전개 + GEMM(m=16)이 CPU 기준과 BF16 1ulp 안(`dory_fp4_matmul_matches_cpu`, 두 파라미터
+  배치). 모델 KL 0.0428, top-1 96.0%(INT8로 다시 저장한 대리 모델 0.0435). matmul 155, quant 115, gemv 67, embedding 12
+  테스트 통과.
+- 해독 비용: 처음 해독(지수·가수 분해와 선택)은 GEMV를 연산에 묶어 180GiB/s에 그쳤습니다. FP16 비트로 바로 만드는
+  해독(`(c & 7) << 9 | (c & 8) << 12`를 FP16으로 읽으면 e2m1 × 2^-14, 2^14는 그룹 스케일에 접음)으로 260~271GiB/s가
+  되었고, 모델 decode가 순차 44.74 → 60.72, wavefront 53.68 → 69.07 tok/s로 올랐습니다.
+- 남은 차이: BF16 그룹 스케일이 MLX g64보다 선형층 바이트를 약 11% 늘립니다(FP8 스케일이면 같아짐). FP4 m=2 GEMV는
+  m=1의 1.16~1.25배로 MLX(1.02~1.07배)보다 나빠 wavefront 이득이 작습니다.

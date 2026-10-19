@@ -74,11 +74,11 @@ impl GemvSpecialization {
         let tile = if is_quant && shape.gathered {
             policy::gathered_tile(bits, shape.b_group_size.unwrap_or(0), shape.m, shape.n)
         } else if is_quant
-            && shape.b_prologue == GemmBPrologueKind::ScaleBiasDequant
             && bf16_io
             && gemm_b_layout != GemmBLayout::MxuTiled
             && shape.k.is_multiple_of(512)
-            && let Some(tile) = policy::scale_bias_batch_tile(bits, shape.b_group_size.unwrap_or(0), shape.m)
+            && let Some(tile) =
+                policy::two_row_batch_tile(shape.b_prologue, bits, shape.b_group_size.unwrap_or(0), shape.m)
         {
             Some(tile)
         } else if is_quant {

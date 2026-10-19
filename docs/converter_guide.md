@@ -122,7 +122,8 @@ JSON으로 줍니다. 엔진 Metal GEMV(decode)가 지원하는 형식만 쓰십
 | `{"type": "MLXSpec", "bits": 4, "group_size": 32}` | scale + bias | 있음(batch 1) | 메타데이터가 늘어 g64보다 약간 느림 |
 | `{"type": "MLXSpec", "bits": 8, ...}` | scale + bias 8비트 | 없음 | 쓰지 마십시오 |
 | `{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}` | 대칭 8비트 | 있음 | 8비트 readout |
-| group 128 | — | 없음(GEMV는 group 32, 64만) | |
+| group 128 | — | 없음(GEMV는 group 16(FP4), 32, 64만) | |
+| ModelOpt NVFP4 체크포인트(아래) | `MicrofloatSpec` FP4 e2m1, group 16, BF16 스케일 | 있음(batch 1, 2), prefill은 BF16 전개 | 보정된 공식 4비트 |
 
 예(Dory INT4, readout INT4):
 
@@ -142,6 +143,21 @@ cd converter && uv run python ../tools/omega_convert.py --spec NVIDIA-Nemotron-L
 # 예: 출력 쪽 마지막 16층의 down projection만 8비트 대칭
 --spec-rule 'layers\[(5[6-9]|6[0-9]|7[01])\]\.mlp\.down=\{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true\}'
 ```
+
+공식 NVFP4 체크포인트(ModelOpt W4A16)가 있으면 부호를 다시 양자화하지 않고 가져옵니다. 같은 NVFP4 형식이라도
+BF16을 단순 반올림하면 Dory에서 KL이 두 배였습니다.
+
+```bash
+M=~/code/uzu-omega/models
+python3 tools/nvfp4_dequant.py --nvfp4 $M/<NVFP4 checkout> --config-from $M/<BF16 checkout> --out /tmp/nvfp4-checkout
+cd converter && uv run python ../tools/omega_convert.py --spec <spec> --checkout /tmp/nvfp4-checkout --out /tmp/nvfp4-base \
+    --encoding '<preset>' --linear-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}' \
+    --readout-spec '{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}' && cd ..
+python3 tools/nvfp4_to_omega.py --base /tmp/nvfp4-base --nvfp4 $M/<NVFP4 checkout> --out $M/<name>-nvfp4
+```
+
+`nvfp4_to_omega.py`의 `SOURCES` 표는 Dory의 융합 순서(qkvg = q, k, v, g; up = up, gate)입니다. 다른 모델은 lalamo
+로더의 `sublayers_to_fuse` 순서를 보고 표를 맞춥니다.
 
 양자화 모델은 참조와 BF16 허용 오차로 비교할 수 없습니다. 품질 묶음(6절)으로 BF16 변환 결과와 비교합니다.
 

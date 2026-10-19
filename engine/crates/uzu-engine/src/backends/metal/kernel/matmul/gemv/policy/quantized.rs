@@ -1,7 +1,7 @@
 use metal::MTLGPUFamily;
 
 use super::{DEFAULT_RESULTS_PER_SIMDGROUP, GemvTile};
-use crate::backends::metal::context::LARGE_MIN_GPU_CORES;
+use crate::backends::{common::gpu_types::gemm::GemmBPrologueKind, metal::context::LARGE_MIN_GPU_CORES};
 
 const QUANT_N_BUCKET_MAXES: [u32; 6] = [512, 2048, 4096, 8192, 16384, 32768];
 const QUANT_K_BUCKET_MAXES: [u32; 3] = [512, 2048, 8192];
@@ -35,7 +35,7 @@ pub fn gathered_tile(
     m: u32,
     n: u32,
 ) -> Option<GemvTile> {
-    if !matches!(bits, 4 | 8) || !matches!(group, 32 | 64) || !(1..=8).contains(&m) {
+    if !matches!(bits, 4 | 8) || !matches!(group, 16 | 32 | 64) || !(1..=8).contains(&m) {
         return None;
     }
     let tile = lane_default(bits, group);
@@ -95,11 +95,12 @@ fn lane_policy(
     }
 }
 
-/// MLX-style (scale and bias) 4-bit, group 64 weights with two input rows: one threadgroup reads
-/// each weight once for both rows (the tile family the tuned zero-point routes use). Measured on
-/// Dory decode shapes on an M5 Pro: 1.02-1.07x the one-row time, against 1.25-1.33x with
-/// `lane_default`, which reads the weights once per row.
-pub fn scale_bias_batch_tile(
+/// MLX-style (scale and bias) 4-bit group 64 or FP4 group 16 weights with two input rows: one
+/// threadgroup reads each weight once for both rows (the tile family the tuned zero-point routes use).
+/// Measured for MLX 4-bit on Dory decode shapes on an M5 Pro: 1.02-1.07x the one-row time, against
+/// 1.25-1.33x with `lane_default`, which reads the weights once per row.
+pub fn two_row_batch_tile(
+    prologue: GemmBPrologueKind,
     bits: u32,
     group: u32,
     m: u32,
@@ -108,7 +109,12 @@ pub fn scale_bias_batch_tile(
     if TILE_OVERRIDE.with(std::cell::Cell::get).is_some() {
         return None;
     }
-    (bits == 4 && group == 64 && m == 2).then(|| GemvTile::quantized_output_tile(2, 16, m, 8, 1))
+    let supported = match prologue {
+        GemmBPrologueKind::ScaleBiasDequant => bits == 4 && group == 64,
+        GemmBPrologueKind::ScaleFp4Dequant => bits == 4 && group == 16,
+        _ => false,
+    };
+    (supported && m == 2).then(|| GemvTile::quantized_output_tile(2, 16, m, 8, 1))
 }
 
 #[cfg(test)]
@@ -127,7 +133,7 @@ pub fn select(
     k: u32,
     bf16_io: bool,
 ) -> Option<GemvTile> {
-    if !matches!(bits, 4 | 8) || !matches!(group, 32 | 64) || !(1..=8).contains(&m) {
+    if !matches!(bits, 4 | 8) || !matches!(group, 16 | 32 | 64) || !(1..=8).contains(&m) {
         return None;
     }
     #[cfg(test)]

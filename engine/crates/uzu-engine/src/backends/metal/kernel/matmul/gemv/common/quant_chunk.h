@@ -2,6 +2,7 @@
 
 #include "../../common/quant_unpack.h"
 #include "../../../common/conversion.h"
+#include "../../../common/fp4.h"
 
 namespace uzu {
 namespace gemm {
@@ -27,6 +28,17 @@ struct QuantChunk {
     const uint word0 = words[word / 4u][word % 4u];
     const uint word1 = BITS == 4 ? 0u : words[(word + 1u) / 4u][(word + 1u) % 4u];
     decode_words(word0, word1, values, origin, signed_codes);
+  }
+
+  /// FP4 e2m1 codes, eight per word, low nibble first, as e2m1 * 2^-14 (the scale carries 2^14).
+  template <uint WORDS>
+  static METAL_FUNC void decode_fp4(const thread uint4 (&words)[WORDS], uint chunk, thread float (&values)[VALUES]) {
+    static_assert(BITS == 4, "FP4 codes are 4-bit");
+    const uint word = words[chunk / 4u][chunk % 4u];
+    METAL_PRAGMA_UNROLL
+    for (uint i = 0; i < VALUES; i++) {
+      values[i] = fp4_e2m1_scaled_down(extract_bits(word, 4u * i, 4u));
+    }
   }
 
   template <bool ALIGNED, typename AT>

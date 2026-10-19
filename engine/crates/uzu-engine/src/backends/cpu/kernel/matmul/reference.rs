@@ -4,7 +4,7 @@ use crate::{
     backends::{
         common::{
             BufferRef,
-            kernel::matmul::{MatmulB, QuantParamsStrides},
+            kernel::matmul::{MatmulB, QuantParamsStrides, QuantizedCorrection},
         },
         cpu::{Cpu, buffer::CpuBufferExt, kernel::matmul::MatmulCpuError},
     },
@@ -27,6 +27,8 @@ pub(super) enum WeightData {
         bits: usize,
         group_size: usize,
         signed_codes: bool,
+        /// FP4 e2m1 codes: value = scale * e2m1(code).
+        fp4: bool,
     },
 }
 
@@ -71,6 +73,7 @@ impl WeightData {
                 bits: quantized.bits() as usize,
                 group_size: quantized.group_size as usize,
                 signed_codes: quantized.signed_codes,
+                fp4: matches!(quantized.correction, QuantizedCorrection::Fp4),
             }),
         }
     }

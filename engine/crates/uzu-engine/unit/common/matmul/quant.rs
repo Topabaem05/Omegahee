@@ -157,7 +157,7 @@ impl<T: DataTypeRepr + Float> QuantInput<T> {
             QuantizationMethod::ScaleZeroPoint => {
                 (Some((0..(n * zp_stride) as usize).map(|_| rng.random_range(0u8..u8::MAX)).collect()), None)
             },
-            QuantizationMethod::ScaleSymmetric => (None, None),
+            QuantizationMethod::ScaleSymmetric | QuantizationMethod::ScaleFp4 => (None, None),
         };
 
         Self {
@@ -384,7 +384,7 @@ impl<B: Backend, T: DataTypeRepr + Float> QuantBuffers<B, T> {
                     correction_bits,
                 );
             },
-            QuantizationMethod::ScaleSymmetric => {},
+            QuantizationMethod::ScaleSymmetric | QuantizationMethod::ScaleFp4 => {},
         }
     }
 }
@@ -403,6 +403,7 @@ fn quant_b_variant<TB: BufferRef, T: DataTypeRepr + Float>(
         QuantizationMethod::ScaleBias => QuantizedCorrection::Biases(biases.expect("bias buffer")),
         QuantizationMethod::ScaleZeroPoint => QuantizedCorrection::ZeroPoints(zero_points.expect("zp buffer")),
         QuantizationMethod::ScaleSymmetric => QuantizedCorrection::Symmetric,
+        QuantizationMethod::ScaleFp4 => QuantizedCorrection::Fp4,
     };
     MatmulB::Quantized(QuantizedB {
         codes: w,

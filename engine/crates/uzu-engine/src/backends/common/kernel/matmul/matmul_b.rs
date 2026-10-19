@@ -43,6 +43,8 @@ pub enum QuantizedCorrection<T> {
     Symmetric,
     Biases(T),
     ZeroPoints(T),
+    /// FP4 (e2m1) codes: value = scale * e2m1(code), no correction term.
+    Fp4,
 }
 
 impl<T> QuantizedCorrection<T> {
@@ -51,20 +53,21 @@ impl<T> QuantizedCorrection<T> {
             Self::Symmetric => QuantizedCorrection::Symmetric,
             Self::Biases(biases) => QuantizedCorrection::Biases(biases),
             Self::ZeroPoints(zero_points) => QuantizedCorrection::ZeroPoints(zero_points),
+            Self::Fp4 => QuantizedCorrection::Fp4,
         }
     }
 
     pub fn biases(&self) -> Option<&T> {
         match self {
             Self::Biases(biases) => Some(biases),
-            Self::Symmetric | Self::ZeroPoints(_) => None,
+            Self::Symmetric | Self::ZeroPoints(_) | Self::Fp4 => None,
         }
     }
 
     pub fn zero_points(&self) -> Option<&T> {
         match self {
             Self::ZeroPoints(zero_points) => Some(zero_points),
-            Self::Symmetric | Self::Biases(_) => None,
+            Self::Symmetric | Self::Biases(_) | Self::Fp4 => None,
         }
     }
 }
@@ -79,6 +82,7 @@ impl<TB: BufferRef> QuantizedB<TB> {
             QuantizedCorrection::Symmetric => GemmBPrologueKind::ScaleSymmetricDequant,
             QuantizedCorrection::Biases(_) => GemmBPrologueKind::ScaleBiasDequant,
             QuantizedCorrection::ZeroPoints(_) => GemmBPrologueKind::ScaleZeroPointDequant,
+            QuantizedCorrection::Fp4 => GemmBPrologueKind::ScaleFp4Dequant,
         }
     }
 

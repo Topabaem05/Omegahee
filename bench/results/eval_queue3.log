@@ -1,0 +1,5 @@
+mix-rec8-e11 gsm8k: 177/200 = 88.5%
+mix-rec8-e11 humaneval: 142/164 = 86.6%
+mix-rec8-e11 mmlu_pro: 210/500 = 42.0%
+mix-rec8-e11 long: 18/20 = 90.0%
+mix-rec8-e11 suite score 76.77%
