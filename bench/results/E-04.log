@@ -1,0 +1,2 @@
+E-04-t256 L2 per_loop prompt_2048.json: decode 67.35 [66.77, 67.38] tok/s, upper 94.7, efficiency 71.1%, prefill 1417 tok/s
+E-04-t256 L2 per_loop prompt_128.json: decode 70.90 [70.14, 71.71] tok/s, upper 94.7, efficiency 74.9%, prefill 1321 tok/s
