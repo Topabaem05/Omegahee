@@ -38,3 +38,25 @@ GSM8K 24문항(질문은 `omega_eval.py` 프롬프트와 Dory 채팅 템플릿(�
   다만 이 수치는 구간이 16위치이고 출력 층이 구간 앞 텍스트를 모두 본 조건입니다.
 - `last_loop`와 `per_loop`의 차이는 작습니다(구간 뒤 top-1 37% 대 32%, 잡음 범위로 봅니다).
 - 원자료: `bench/hybrid/h04_continuity_{lastloop,perloop}.json`, 실행 기록 `bench/hybrid/h04_run.log`.
+
+## H-01 `last_loop` 품질 기준선 (2026-10-19)
+
+같은 가중치(`nvfp4-r4-fp8s`)에 KV 모드만 바꿔 순차 decode로 품질 묶음을 쟀습니다(추론 끔, greedy).
+
+| KV 모드 | GSM8K | HumanEval | MMLU-Pro | 16K 검색 | 묶음 | BF16 대비 |
+|---|---|---|---|---|---|---|
+| `per_loop` | 88.5 | 85.4 | 42.8 | 90.0 | 76.67 | 97.7% |
+| `last_loop` | 91.0 | 82.3 | 42.8 | 100.0 | 79.03 | 100.7% |
+
+- `last_loop` decode는 전체 재계산과 같지 않은 근사지만(`docs/dory_stage0_reference_20261019.md`), 품질 묶음은 떨어지지
+  않았습니다. 과제별 차이(HumanEval -3.1점, GSM8K +2.5점, 16K 검색 +2문항)는 작은 묶음의 잡음 범위로 봅니다.
+- **판정 G1(제안):** 가정 A1 통과. 하이브리드 설계대로 `last_loop`를 씁니다. 다만 현재 wavefront(91.35 tok/s)는
+  `per_loop`만 지원하므로, 텍스트 속도를 지키려면 H-02(`last_loop` wavefront)가 다음 일입니다. `last_loop` 순차 속도는
+  E-01에서 `per_loop`보다 1~2% 느렸습니다.
+- 원자료: `bench/eval_runs/nvfp4-r4-fp8s-{sequential,lastloop-sequential}-h01`, `bench/results/eval_h01.log`.
+
+## H-03 상태
+
+다른 세션이 CPU 작업을 계속 돌려(CPU 유휴 26~60%) 깨끗한 측정을 아직 못 했습니다. 부하 아래 예비값(같은 실행 안 비교,
+2K): 텍스트 스텝 43.3 steps/s, 잠재 스텝 코어 1회 128.9, 2회 68.0 steps/s(약 3.0배, 1.6배). 이 하네스의 텍스트 스텝은
+CPU 부하에 더 크게 흔들리므로 배율은 실제보다 높을 수 있습니다.

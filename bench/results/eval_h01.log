@@ -1,0 +1,11 @@
+nvfp4-r4-fp8s-sequential-h01 gsm8k: 177/200 = 88.5%
+nvfp4-r4-fp8s-sequential-h01 humaneval: 140/164 = 85.4%
+nvfp4-r4-fp8s-sequential-h01 mmlu_pro: 214/500 = 42.8%
+nvfp4-r4-fp8s-sequential-h01 long: 18/20 = 90.0%
+nvfp4-r4-fp8s-sequential-h01 suite score 76.67%
+nvfp4-r4-fp8s-lastloop-sequential-h01 gsm8k: 182/200 = 91.0%
+nvfp4-r4-fp8s-lastloop-sequential-h01 humaneval: 135/164 = 82.3%
+nvfp4-r4-fp8s-lastloop-sequential-h01 mmlu_pro: 214/500 = 42.8%
+nvfp4-r4-fp8s-lastloop-sequential-h01 long: 20/20 = 100.0%
+nvfp4-r4-fp8s-lastloop-sequential-h01 suite score 79.03%
+EVAL_H01_DONE
