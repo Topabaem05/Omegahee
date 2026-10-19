@@ -1,0 +1,4 @@
+E-11-mix-rec8-sequential L2 per_loop prompt_2048.json: decode 48.17 [48.12, 48.19] tok/s, upper 61.9, efficiency 77.9%, prefill 1413 tok/s
+E-11-mix-rec8-wavefront L2 per_loop prompt_2048.json: decode 61.69 [61.13, 62.88] tok/s, upper 61.9, efficiency 99.7%, prefill 1404 tok/s
+E-11-mix-recqkvgup8-sequential L2 per_loop prompt_2048.json: decode 50.63 [50.30, 50.78] tok/s, upper 69.4, efficiency 72.9%, prefill 1353 tok/s
+E-11-mix-recqkvgup8-wavefront L2 per_loop prompt_2048.json: decode 65.08 [64.70, 65.20] tok/s, upper 69.4, efficiency 93.7%, prefill 1383 tok/s

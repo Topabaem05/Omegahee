@@ -27,10 +27,12 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
+# isort: off
+import lalamo  # noqa: F401  (configures JAX before it is imported)
 import jax
 import jax.numpy as jnp
+# isort: on
 
-import lalamo  # noqa: F401  (configures JAX before it is imported)
 from lalamo.model_import.common import import_model
 from lalamo.model_import.model_specs import ALL_MODEL_LISTS
 from lalamo.model_import.origins import LocalOrigin
