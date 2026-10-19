@@ -1,0 +1,16 @@
+# Dory batch-2 INT4 MLX g64 GEMV tiles, M5 Pro, cold weights, criterion median
+qkvg_M2/sg8_r4_in1_l32_g4 64.265 µs
+qkvg_M2/sg2_r8_in2_l8_g1 52.252 µs
+qkvg_M2/sg2_r4_in2_l8_g1 56.091 µs
+out_M2/sg8_r4_in1_l32_g4 25.885 µs
+out_M2/sg2_r8_in2_l8_g1 20.668 µs
+out_M2/sg2_r4_in2_l8_g1 23.120 µs
+up_M2/sg8_r4_in1_l32_g4 93.309 µs
+up_M2/sg2_r8_in2_l8_g1 75.119 µs
+up_M2/sg2_r4_in2_l8_g1 83.570 µs
+down_M2/sg8_r4_in1_l32_g4 47.196 µs
+down_M2/sg2_r8_in2_l8_g1 37.895 µs
+down_M2/sg2_r4_in2_l8_g1 42.151 µs
+readout_M2/sg8_r4_in1_l32_g4 853.70 µs
+readout_M2/sg2_r8_in2_l8_g1 683.67 µs
+readout_M2/sg2_r4_in2_l8_g1 751.45 µs

@@ -65,7 +65,7 @@ CONSTRAINT(
 
 CONSTRAINT(
     INPUT_ROW_TILE == 1 ||
-    (B_PROLOGUE != GemmBPrologueKind::ScaleBiasDequant && GROUP_SIZE == 64 &&
+    (GROUP_SIZE == 64 &&
      ((GEMV_TILE(16, 8, 2) && INPUT_ROWS(2, 7)) ||
       (BITS == 4 && GEMV_TILE(16, 16, 4) && INPUT_ROWS(3, 6)) ||
       (BITS == 4 && GEMV_TILE(8, 8, 2) && INPUT_ROW_TILE == 2))))

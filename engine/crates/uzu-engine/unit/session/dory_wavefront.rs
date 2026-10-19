@@ -334,6 +334,12 @@ fn run<B: Backend>(spec: &Spec) {
         .expect("decoder");
     assert!(decoder.wavefront_supported(), "this model does not support wavefront decoding");
 
+    #[cfg(backend = "metal")]
+    if std::env::var_os("OMEGA_FORCE_DEFAULT_GEMV_TILE").is_some() {
+        // Attribution runs: the quantized GEMV tile that every batch used before the two-row tile.
+        use crate::backends::metal::{GemvTile, TILE_OVERRIDE};
+        TILE_OVERRIDE.with(|tile| tile.set(Some(GemvTile::quantized(8, 4, 1, 32, 4))));
+    }
     if let Some(dump_dir) = &spec.teacher_forced_dump_dir {
         std::fs::create_dir_all(dump_dir).unwrap();
         for prompt in prompts.iter().filter(|prompt| spec.only.as_ref().is_none_or(|only| only.contains(&prompt.id))) {

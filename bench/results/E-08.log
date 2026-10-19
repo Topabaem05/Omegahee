@@ -1,0 +1,5 @@
+E-08-wavefront-m2tile L2 per_loop prompt_128.json: decode 85.77 [85.10, 86.14] tok/s, upper 94.7, efficiency 90.6%, prefill 1390 tok/s
+E-08-wavefront-m2tile L2 per_loop prompt_2048.json: decode 82.27 [81.42, 82.35] tok/s, upper 94.7, efficiency 86.9%, prefill 1382 tok/s
+E-08-wavefront-m2tile L2 per_loop prompt_16384.json: decode 60.27 [59.44, 60.69] tok/s, upper 94.7, efficiency 63.7%, prefill 1160 tok/s
+E-08-wavefront-m2tile-r4 L2 per_loop prompt_2048.json: decode 83.78 [82.85, 84.97] tok/s, upper 99.5, efficiency 84.2%, prefill 1398 tok/s
+E-08-sequential-check L2 per_loop prompt_2048.json: decode 66.49 [65.82, 67.24] tok/s, upper 94.7, efficiency 70.2%, prefill 1390 tok/s

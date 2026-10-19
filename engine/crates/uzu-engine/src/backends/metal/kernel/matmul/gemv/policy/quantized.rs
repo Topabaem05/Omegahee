@@ -95,6 +95,28 @@ fn lane_policy(
     }
 }
 
+/// MLX-style (scale and bias) 4-bit, group 64 weights with two input rows: one threadgroup reads
+/// each weight once for both rows (the tile family the tuned zero-point routes use). Measured on
+/// Dory decode shapes on an M5 Pro: 1.02-1.07x the one-row time, against 1.25-1.33x with
+/// `lane_default`, which reads the weights once per row.
+pub fn scale_bias_batch_tile(
+    bits: u32,
+    group: u32,
+    m: u32,
+) -> Option<GemvTile> {
+    #[cfg(test)]
+    if TILE_OVERRIDE.with(std::cell::Cell::get).is_some() {
+        return None;
+    }
+    (bits == 4 && group == 64 && m == 2).then(|| GemvTile::quantized_output_tile(2, 16, m, 8, 1))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only: forces the tile of 4-bit quantized GEMVs, for tile sweeps (`dory_bench.rs`).
+    pub(crate) static TILE_OVERRIDE: std::cell::Cell<Option<GemvTile>> = const { std::cell::Cell::new(None) };
+}
+
 pub fn select(
     gpu_core_count: u32,
     apple_gpu_family: MTLGPUFamily,
@@ -107,6 +129,10 @@ pub fn select(
 ) -> Option<GemvTile> {
     if !matches!(bits, 4 | 8) || !matches!(group, 32 | 64) || !(1..=8).contains(&m) {
         return None;
+    }
+    #[cfg(test)]
+    if let Some(tile) = TILE_OVERRIDE.with(std::cell::Cell::get).filter(|_| bits == 4) {
+        return Some(tile);
     }
 
     if !bf16_io {

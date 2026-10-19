@@ -1,6 +1,8 @@
 mod error;
 pub mod gemm;
 mod gemv;
+#[cfg(test)]
+pub(crate) use gemv::{GemvTile, TILE_OVERRIDE};
 mod matmul_dispatch;
 mod matmul_metal_kernel;
 mod matmul_output_work;

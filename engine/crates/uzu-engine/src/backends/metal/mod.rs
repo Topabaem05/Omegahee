@@ -8,6 +8,8 @@ mod error;
 mod gpu_types;
 mod heaps;
 mod kernel;
+#[cfg(test)]
+pub(crate) use kernel::matmul::{GemvTile, TILE_OVERRIDE};
 mod metal_extensions;
 
 pub use backend::Metal;
