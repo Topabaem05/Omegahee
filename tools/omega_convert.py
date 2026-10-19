@@ -27,9 +27,10 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-import lalamo  # noqa: F401  (configures JAX before it is imported)
 import jax
 import jax.numpy as jnp
+
+import lalamo  # noqa: F401  (configures JAX before it is imported)
 from lalamo.model_import.common import import_model
 from lalamo.model_import.model_specs import ALL_MODEL_LISTS
 from lalamo.model_import.origins import LocalOrigin
@@ -128,8 +129,12 @@ def main() -> int:
     ap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     ap.add_argument("--override", action="append", default=[], help="config.json key=value (JSON value)")
     ap.add_argument("--encoding", help="JSON for the engine's encoding.json (chat encoding), e.g. hanashi preset")
-    ap.add_argument("--linear-spec", help='quantize transformer linears, e.g. {"type": "MLXSpec", "bits": 4, "group_size": 64}')
-    ap.add_argument("--readout-spec", help='quantize the readout matrix, e.g. {"type": "MLXSpec", "bits": 8, "group_size": 64}')
+    ap.add_argument(
+        "--linear-spec", help='quantize transformer linears, e.g. {"type": "MLXSpec", "bits": 4, "group_size": 64}'
+    )
+    ap.add_argument(
+        "--readout-spec", help='quantize the readout matrix, e.g. {"type": "MLXSpec", "bits": 8, "group_size": 64}'
+    )
     ap.add_argument(
         "--spec-rule",
         action="append",
@@ -151,7 +156,9 @@ def main() -> int:
     imported = import_model(local_spec, sharding_config=ShardingConfig.replicated(), dtype=jnp.dtype(args.dtype))
     model = imported.model
     if args.list_matrices:
-        leaves = jax.tree_util.tree_flatten_with_path(model, is_leaf=lambda leaf: isinstance(leaf, FullPrecisionMatrix))[0]
+        leaves = jax.tree_util.tree_flatten_with_path(
+            model, is_leaf=lambda leaf: isinstance(leaf, FullPrecisionMatrix)
+        )[0]
         for path, leaf in leaves:
             if isinstance(leaf, FullPrecisionMatrix):
                 print(matrix_name(path))
