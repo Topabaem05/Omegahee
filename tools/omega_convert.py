@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -68,15 +69,29 @@ def stage_checkout(checkout: Path, overrides: dict[str, object]) -> Path:
     return staged
 
 
-def quantize(model, linear_spec: WeightMatrixSpec | None, readout_spec: WeightMatrixSpec | None):  # noqa: ANN001, ANN201
+def matrix_name(path: tuple) -> str:
+    return jax.tree_util.keystr(path)
+
+
+def quantize(  # noqa: ANN201
+    model,  # noqa: ANN001
+    linear_spec: WeightMatrixSpec | None,
+    readout_spec: WeightMatrixSpec | None,
+    rules: list[tuple[re.Pattern[str], WeightMatrixSpec | None]] = (),
+):
     """Re-encodes the full-precision transformer linears and the readout matrix. Input embeddings and
-    per-channel vectors stay in full precision."""
+    per-channel vectors stay in full precision. `rules` (regex on the matrix path, first match wins)
+    override the default spec for single matrices; a rule with spec `null` keeps the matrix in full
+    precision."""
 
     def convert(path: tuple, leaf: object) -> object:
         if not isinstance(leaf, FullPrecisionMatrix):
             return leaf
-        name = jax.tree_util.keystr(path)
-        if ".transformer." in name:
+        name = matrix_name(path)
+        rule = next((spec for pattern, spec in rules if pattern.search(name)), "default")
+        if rule != "default":
+            spec = rule
+        elif ".transformer." in name:
             spec = linear_spec
         elif "output_embedding" in name:
             spec = readout_spec
@@ -87,6 +102,14 @@ def quantize(model, linear_spec: WeightMatrixSpec | None, readout_spec: WeightMa
         return spec.compress(leaf.decompress(), sharding_config=leaf.sharding_config, is_sharded=leaf.is_sharded)
 
     return jax.tree_util.tree_map_with_path(convert, model, is_leaf=lambda leaf: isinstance(leaf, FullPrecisionMatrix))
+
+
+def parse_rule(text: str) -> tuple[re.Pattern[str], WeightMatrixSpec | None]:
+    pattern, sep, spec = text.partition("=")
+    if not sep:
+        raise SystemExit(f"Spec rules look like REGEX=JSON, got {text!r}")
+    value = json.loads(spec)
+    return re.compile(pattern), (WeightMatrixSpec.from_json(value) if value is not None else None)
 
 
 def sha256(path: Path) -> str:
@@ -107,6 +130,14 @@ def main() -> int:
     ap.add_argument("--encoding", help="JSON for the engine's encoding.json (chat encoding), e.g. hanashi preset")
     ap.add_argument("--linear-spec", help='quantize transformer linears, e.g. {"type": "MLXSpec", "bits": 4, "group_size": 64}')
     ap.add_argument("--readout-spec", help='quantize the readout matrix, e.g. {"type": "MLXSpec", "bits": 8, "group_size": 64}')
+    ap.add_argument(
+        "--spec-rule",
+        action="append",
+        default=[],
+        help="REGEX=JSON spec for matrices whose path matches (first rule wins; null keeps full precision), "
+        'e.g. "layers\\[(1[6-9]|[2-4][0-9]|5[0-5])\\].*down=null"',
+    )
+    ap.add_argument("--list-matrices", action="store_true", help="print the weight matrix paths and exit")
     args = ap.parse_args()
 
     checkout = args.checkout.expanduser().resolve()
@@ -119,10 +150,17 @@ def main() -> int:
 
     imported = import_model(local_spec, sharding_config=ShardingConfig.replicated(), dtype=jnp.dtype(args.dtype))
     model = imported.model
-    if args.linear_spec or args.readout_spec:
+    if args.list_matrices:
+        leaves = jax.tree_util.tree_flatten_with_path(model, is_leaf=lambda leaf: isinstance(leaf, FullPrecisionMatrix))[0]
+        for path, leaf in leaves:
+            if isinstance(leaf, FullPrecisionMatrix):
+                print(matrix_name(path))
+        return 0
+    rules = [parse_rule(text) for text in args.spec_rule]
+    if args.linear_spec or args.readout_spec or rules:
         linear_spec = WeightMatrixSpec.from_json(json.loads(args.linear_spec)) if args.linear_spec else None
         readout_spec = WeightMatrixSpec.from_json(json.loads(args.readout_spec)) if args.readout_spec else None
-        model = quantize(model, linear_spec, readout_spec)
+        model = quantize(model, linear_spec, readout_spec, rules)
     out = args.out.expanduser()
     model.save(out)
     if args.encoding:
@@ -134,6 +172,7 @@ def main() -> int:
         "dtype": args.dtype,
         "linear_spec": json.loads(args.linear_spec) if args.linear_spec else None,
         "readout_spec": json.loads(args.readout_spec) if args.readout_spec else None,
+        "spec_rules": args.spec_rule,
         "weights_sha256": {name: sha256(checkout / name) for name in weight_files},
         "output_sha256": sha256(out / "model.safetensors"),
     }

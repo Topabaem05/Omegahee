@@ -129,6 +129,15 @@ cd converter && uv run python ../tools/omega_convert.py --spec NVIDIA-Nemotron-L
     --readout-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}'
 ```
 
+층마다 형식을 다르게 하려면 `--spec-rule '정규식=spec'`을 씁니다. 정규식은 행렬 경로에 맞추고, 먼저 맞은 규칙이
+이깁니다. spec이 `null`이면 그 행렬은 원래 정밀도로 둡니다. 경로 목록은 `--list-matrices`로 봅니다
+(예: `.decoder.transformer.layers[67].mlp.down_projection.weights`).
+
+```bash
+# 예: 출력 쪽 마지막 16층의 down projection만 8비트 대칭
+--spec-rule 'layers\[(5[6-9]|6[0-9]|7[01])\]\.mlp\.down=\{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true\}'
+```
+
 양자화 모델은 참조와 BF16 허용 오차로 비교할 수 없습니다. 품질 묶음(6절)으로 BF16 변환 결과와 비교합니다.
 
 ## 6. 측정
