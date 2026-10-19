@@ -152,9 +152,13 @@ M=~/code/uzu-omega/models
 python3 tools/nvfp4_dequant.py --nvfp4 $M/<NVFP4 checkout> --config-from $M/<BF16 checkout> --out /tmp/nvfp4-checkout
 cd converter && uv run python ../tools/omega_convert.py --spec <spec> --checkout /tmp/nvfp4-checkout --out /tmp/nvfp4-base \
     --encoding '<preset>' --linear-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}' \
-    --readout-spec '{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}' && cd ..
+    --readout-spec '{"type": "MLXSpec", "bits": 4, "group_size": 64}' && cd ..
 python3 tools/nvfp4_to_omega.py --base /tmp/nvfp4-base --nvfp4 $M/<NVFP4 checkout> --out $M/<name>-nvfp4 --fp8-scales
 ```
+
+Dory에서는 이 구성(FP8 스케일 NVFP4 선형층 + readout INT4 MLX g64)을 `OMEGA_WAVEFRONT=1`로 돌릴 때가 품질 묶음
+BF16 대비 98.0%로 가장 빨랐습니다(2K 91.35 tok/s, `docs/dory_research_log.md` 현재 결과 요약). readout을 8비트 대칭
+(`{"type": "IntSpec", "bits": 8, "group_size": 64, "is_symmetric": true}`)으로 두면 KL이 조금 낮고 약 8% 느립니다.
 
 `--fp8-scales`는 체크포인트의 E4M3 블록 스케일 바이트를 그대로 두고(U8 [그룹, 행]) 행마다 FP32 텐서 스케일
 (`weights.row_scales`, F32 [행])을 따로 씁니다. 값이 체크포인트와 정확히 같고, BF16 스케일보다 선형층 바이트가 약
