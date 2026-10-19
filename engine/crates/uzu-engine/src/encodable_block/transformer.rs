@@ -1,5 +1,7 @@
 use std::range::Range;
 
+#[cfg(test)]
+mod hybrid;
 mod wavefront;
 use derive_more::Debug;
 use thiserror::Error;

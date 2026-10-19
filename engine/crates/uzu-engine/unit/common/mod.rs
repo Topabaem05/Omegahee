@@ -14,6 +14,9 @@ pub mod util;
 
 #[path = "../bench_cold_pool_test.rs"]
 mod bench_cold_pool_test;
+#[cfg(test)]
+#[path = "../session/dory_hybrid.rs"]
+mod dory_hybrid;
 #[path = "../session/dory_parity.rs"]
 mod dory_parity;
 #[path = "../session/dory_wavefront.rs"]

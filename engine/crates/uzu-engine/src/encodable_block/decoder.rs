@@ -249,3 +249,86 @@ impl<B: Backend> Decoder<B> {
         })
     }
 }
+
+#[cfg(test)]
+impl<B: Backend> Decoder<B> {
+    /// Experimental core latent loop (see `transformer::hybrid`).
+    pub fn hybrid_supported(&self) -> bool {
+        self.per_layer_embedding.is_none() && self.transformer.hybrid_supported()
+    }
+
+    pub fn latent_slots(
+        &self,
+        loops: u32,
+    ) -> Box<[u32]> {
+        self.transformer.latent_slots(loops)
+    }
+
+    fn readout_row(
+        &self,
+        hidden: &B::ScratchBuffer,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<B::ScratchBuffer, DecoderError<B>> {
+        Ok(self.embedding.encode_readout(
+            hidden,
+            1,
+            self.embedding.vocab_size(),
+            None::<&B::ScratchBuffer>,
+            true,
+            command_buffer,
+        )?)
+    }
+
+    /// One text step at the global `position`: returns its logits and the recurrent block's final state.
+    pub fn encode_text_with_core_state(
+        &self,
+        token_id: impl BufferRef<Backend = B>,
+        position: u32,
+        state: &mut TransformerState<B>,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<(B::ScratchBuffer, B::ScratchBuffer), DecoderError<B>> {
+        let embedded = self.embedding.encode_lookup(token_id, 1, command_buffer)?;
+        let embedded = match &self.embedding_norm {
+            Some(embedding_norm) => embedding_norm
+                .encode(&embedded, 0, 1, None::<&mut B::ScratchBuffer>, command_buffer)
+                .map_err(DecoderError::Backend)?,
+            None => embedded,
+        };
+        let (hidden, core_state) =
+            self.transformer.encode_text_with_core_state(embedded, position, state, command_buffer)?;
+        Ok((self.readout_row(&hidden, command_buffer)?, core_state))
+    }
+
+    pub fn encode_reinjected(
+        &self,
+        state: &B::ScratchBuffer,
+        update: &B::ScratchBuffer,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<B::ScratchBuffer, DecoderError<B>> {
+        Ok(self.transformer.encode_reinjected(state, update, command_buffer)?)
+    }
+
+    /// One latent step at the global `position` on the latent link's output `input`; returns the new state.
+    pub fn encode_latent_core(
+        &self,
+        input: &B::ScratchBuffer,
+        position: u32,
+        loops: u32,
+        state: &mut TransformerState<B>,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<B::ScratchBuffer, DecoderError<B>> {
+        Ok(self.transformer.encode_latent_core(input, position, loops, state, command_buffer)?)
+    }
+
+    /// Logits read out from a recurrent block state through the output layers (their KV stays uncommitted).
+    pub fn encode_latent_readout(
+        &self,
+        core_state: &B::ScratchBuffer,
+        position: u32,
+        state: &mut TransformerState<B>,
+        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+    ) -> Result<B::ScratchBuffer, DecoderError<B>> {
+        let hidden = self.transformer.encode_output_readout(core_state, position, state, command_buffer)?;
+        self.readout_row(&hidden, command_buffer)
+    }
+}

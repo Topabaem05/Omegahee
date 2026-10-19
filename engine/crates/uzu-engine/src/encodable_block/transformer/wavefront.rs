@@ -155,7 +155,7 @@ impl<B: Backend> Transformer<B> {
         self.wavefront_recurrence().is_some() && self.slot_layers.iter().all(|(_, shared)| shared.is_none())
     }
 
-    fn slot_of(
+    pub(super) fn slot_of(
         &self,
         layer_index: u32,
         loop_index: u32,
