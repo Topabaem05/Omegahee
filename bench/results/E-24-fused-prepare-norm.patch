@@ -1,0 +1,736 @@
+diff --git a/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/attention_prepare_norm.rs b/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/attention_prepare_norm.rs
+new file mode 100644
+index 00000000..b36dc138
+--- /dev/null
++++ b/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/attention_prepare_norm.rs
+@@ -0,0 +1,136 @@
++use half::bf16;
++use num_traits::Float;
++use uzu_engine_macros::kernel;
++
++use crate::data_type::DataTypeRepr;
++
++/// QKVNorm on the query and key heads, then AttentionPrepare (RoPE, query scales, KV append), as the two
++/// kernels compute them. Value heads are copied unnormalized. The norms have per-element scales or none.
++#[kernel(AttentionPrepareNorm)]
++#[variants(ElementT, bf16)]
++#[variants(RopeT, f32)]
++pub fn attention_prepare_norm<ElementT: DataTypeRepr + Float, RopeT: DataTypeRepr + Float>(
++    qkvg: *const ElementT,
++    queries: *mut ElementT,
++    #[optional(has_kv)] keys: Option<*mut ElementT>,
++    #[optional(has_kv)] values: Option<*mut ElementT>,
++    #[optional(has_rope)] cosines: Option<*const RopeT>,
++    #[optional(has_rope)] sines: Option<*const RopeT>,
++    #[optional(has_query_scales)] query_scales: Option<*const f32>,
++    #[optional(has_norm_scales)] query_norm_scales: Option<*const f32>,
++    #[optional(has_norm_scales)] key_norm_scales: Option<*const f32>,
++    num_q_heads: u32,
++    #[optional(has_kv)] num_kv_heads: Option<u32>,
++    head_dim: u32,
++    #[optional(has_rope)] rope_dim: Option<u32>,
++    #[optional(has_kv)] kv_token_offset: Option<u32>,
++    input_row_stride: u32,
++    batch_dim: u32,
++    query_epsilon: f32,
++    key_epsilon: f32,
++    query_scale_offset: f32,
++    key_scale_offset: f32,
++    #[specialize] has_kv: bool,
++    #[specialize] has_rope: bool,
++    #[specialize] has_query_scales: bool,
++    #[specialize] full_layer: bool,
++    #[specialize] sum_reduction: bool,
++    #[specialize] has_norm_scales: bool,
++) {
++    assert_eq!(keys.is_some(), has_kv, "attention prepare norm keys presence mismatch");
++    assert_eq!(cosines.is_some(), has_rope, "attention prepare norm cosines presence mismatch");
++    assert_eq!(query_scales.is_some(), has_query_scales, "attention prepare norm query_scales presence mismatch");
++    assert_eq!(query_norm_scales.is_some(), has_norm_scales, "attention prepare norm scales presence mismatch");
++    let num_q_heads = num_q_heads as usize;
++    let num_kv_heads = num_kv_heads.unwrap_or(0) as usize;
++    let head_dim = head_dim as usize;
++    let rope_dim = rope_dim.unwrap_or(0) as usize;
++    let kv_token_offset = kv_token_offset.unwrap_or(0) as usize;
++    let batch_dim = batch_dim as usize;
++    let total_heads = num_q_heads + 2 * num_kv_heads;
++    let mut head_values = vec![ElementT::zero(); head_dim];
++
++    for batch_idx in 0..batch_dim {
++        for head_idx in 0..total_heads {
++            let head = unsafe { qkvg.add(batch_idx * input_row_stride as usize + head_idx * head_dim) };
++            let is_query = head_idx < num_q_heads;
++            let is_key = has_kv && !is_query && head_idx < num_q_heads + num_kv_heads;
++            let read = |index: usize| unsafe { (*head.add(index)).to_f32().unwrap() };
++            if is_query || is_key {
++                let (scales, epsilon, scale_offset) = if is_query {
++                    (query_norm_scales, query_epsilon, query_scale_offset)
++                } else {
++                    (key_norm_scales, key_epsilon, key_scale_offset)
++                };
++                let total_sum =
++                    (0..head_dim).map(|index| read(index) * read(index)).fold(0.0f32, |sum, value| sum + value);
++                let mean_square = if sum_reduction {
++                    total_sum
++                } else {
++                    total_sum / head_dim as f32
++                };
++                let rms = (mean_square + epsilon).sqrt().recip();
++                for (index, value) in head_values.iter_mut().enumerate() {
++                    let normalized = read(index) * rms;
++                    *value = match scales {
++                        None => ElementT::from(normalized).unwrap(),
++                        Some(scales) => {
++                            let scale = unsafe { *scales.add(index) } + scale_offset;
++                            if full_layer {
++                                ElementT::from(normalized * scale).unwrap()
++                            } else {
++                                ElementT::from(normalized).unwrap() * ElementT::from(scale).unwrap()
++                            }
++                        },
++                    };
++                }
++            } else {
++                for (index, value) in head_values.iter_mut().enumerate() {
++                    *value = unsafe { *head.add(index) };
++                }
++            }
++
++            for index in 0..head_dim {
++                let mut element = head_values[index];
++                if has_rope && index < rope_dim && (is_query || is_key) {
++                    let half_rope_dim = rope_dim / 2;
++                    let paired_index = if index < half_rope_dim {
++                        index + half_rope_dim
++                    } else {
++                        index - half_rope_dim
++                    };
++                    let paired = head_values[paired_index].to_f32().unwrap();
++                    let signed_paired = if index < half_rope_dim {
++                        -paired
++                    } else {
++                        paired
++                    };
++                    let cos_val = unsafe { (*cosines.unwrap().add(batch_idx * rope_dim + index)).to_f32().unwrap() };
++                    let sin_val = unsafe { (*sines.unwrap().add(batch_idx * rope_dim + index)).to_f32().unwrap() };
++                    element = ElementT::from(element.to_f32().unwrap() * cos_val + signed_paired * sin_val).unwrap();
++                }
++                if is_query && let Some(query_scales) = query_scales {
++                    let scale = unsafe { *query_scales.add(head_idx * head_dim + index) };
++                    element = ElementT::from(element.to_f32().unwrap() * scale).unwrap();
++                }
++                unsafe {
++                    if is_query {
++                        *queries.add(head_idx * batch_dim * head_dim + batch_idx * head_dim + index) = element;
++                    } else if is_key {
++                        *keys.unwrap().add(
++                            (kv_token_offset + batch_idx) * num_kv_heads * head_dim
++                                + (head_idx - num_q_heads) * head_dim
++                                + index,
++                        ) = element;
++                    } else {
++                        *values.unwrap().add(
++                            (kv_token_offset + batch_idx) * num_kv_heads * head_dim
++                                + (head_idx - num_q_heads - num_kv_heads) * head_dim
++                                + index,
++                        ) = element;
++                    }
++                }
++            }
++        }
++    }
++}
+diff --git a/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/mod.rs b/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/mod.rs
+index bb9b0135..d7c86c4c 100644
+--- a/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/mod.rs
++++ b/engine/crates/uzu-engine/src/backends/cpu/kernel/attention/mod.rs
+@@ -2,6 +2,7 @@ use crate::backends::common::Backend;
+ 
+ pub mod ancestor_attention;
+ pub mod attention_prepare;
++pub mod attention_prepare_norm;
+ pub mod attention_single_pass;
+ pub mod kv_cache_update;
+ pub mod prepare_int8;
+diff --git a/engine/crates/uzu-engine/src/backends/metal/kernel/attention/attention_prepare_norm.metal b/engine/crates/uzu-engine/src/backends/metal/kernel/attention/attention_prepare_norm.metal
+new file mode 100644
+index 00000000..b41a3a7a
+--- /dev/null
++++ b/engine/crates/uzu-engine/src/backends/metal/kernel/attention/attention_prepare_norm.metal
+@@ -0,0 +1,128 @@
++#include <metal_stdlib>
++#include "../common/defines.h"
++#include "../common/dsl.h"
++
++using namespace metal;
++
++#define PREPARE_NORM_GRAIN 4
++
++// QKVNorm on the query and key heads followed by AttentionPrepare, in one dispatch. One SIMD group handles one
++// head of one token with QKVNorm's lane layout and reduction order, so the normalized values (rounded to
++// ElementT) are the ones QKVNorm would have written; RoPE, the query scales and the KV append then follow
++// AttentionPrepare. Value heads are copied unnormalized. Both norms use the same upcast mode and reduction, and
++// either both have per-element scales or neither has (nGPT's unit norms).
++template <typename ElementT>
++METAL_FUNC ElementT prepare_norm_value(
++    const device ElementT* head,
++    const device float* scales,
++    uint32_t index,
++    float rms,
++    float scale_offset,
++    bool has_scales,
++    bool full_layer
++) {
++  const float normalized_high = static_cast<float>(head[index]) * rms;
++  if (!has_scales) {
++    return static_cast<ElementT>(normalized_high);
++  }
++  if (full_layer) {
++    return static_cast<ElementT>(normalized_high * (scales[index] + scale_offset));
++  }
++  const ElementT normalized_low = static_cast<ElementT>(normalized_high);
++  const ElementT scale_value_low = static_cast<ElementT>(scales[index] + scale_offset);
++  return static_cast<ElementT>(normalized_low * scale_value_low);
++}
++
++template <typename ElementT, typename RopeT>
++VARIANTS(ElementT, bfloat)
++VARIANTS(RopeT, float)
++PUBLIC KERNEL(AttentionPrepareNorm)(
++    const device ElementT* qkvg, // [token, input_row_stride], with an optional trailing gate
++    device ElementT* queries, // [head_idx, token, head_dim]
++    device ElementT* keys OPTIONAL(has_kv), // [(kv_token_offset + token), head_idx, head_dim]
++    device ElementT* values OPTIONAL(has_kv), // [(kv_token_offset + token), head_idx, head_dim]
++    const device RopeT* cosines OPTIONAL(has_rope),
++    const device RopeT* sines OPTIONAL(has_rope),
++    const device float* query_scales OPTIONAL(has_query_scales), // [num_q_heads * head_dim], after RoPE
++    const device float* query_norm_scales OPTIONAL(has_norm_scales), // [head_dim]
++    const device float* key_norm_scales OPTIONAL(has_norm_scales), // [head_dim]
++    const constant uint32_t& num_q_heads,
++    const constant uint32_t& num_kv_heads OPTIONAL(has_kv),
++    const constant uint32_t& head_dim,
++    const constant uint32_t& rope_dim OPTIONAL(has_rope),
++    const constant uint32_t& kv_token_offset OPTIONAL(has_kv),
++    const constant uint32_t& input_row_stride,
++    const constant uint32_t& batch_dim,
++    const constant float& query_epsilon,
++    const constant float& key_epsilon,
++    const constant float& query_scale_offset,
++    const constant float& key_scale_offset,
++    const bool has_kv SPECIALIZE,
++    const bool has_rope SPECIALIZE,
++    const bool has_query_scales SPECIALIZE,
++    const bool full_layer SPECIALIZE,
++    const bool sum_reduction SPECIALIZE,
++    const bool has_norm_scales SPECIALIZE,
++    const uint32_t head_idx GROUPS(num_q_heads + num_kv_heads.unwrap_or(0) * 2),
++    const uint32_t batch_idx GROUPS(batch_dim),
++    const uint32_t lane THREADS(METAL_SIMD_SIZE)
++) {
++  const device ElementT* head = qkvg + batch_idx * input_row_stride + head_idx * head_dim;
++  const bool is_query = head_idx < num_q_heads;
++  const bool is_key = has_kv && !is_query && head_idx < num_q_heads + num_kv_heads;
++  const bool normalized = is_query || is_key;
++  const device float* norm_scales = is_query ? query_norm_scales : key_norm_scales;
++  const float epsilon = is_query ? query_epsilon : key_epsilon;
++  const float scale_offset = is_query ? query_scale_offset : key_scale_offset;
++
++  float rms = 1.0f;
++  if (normalized) {
++    float partial_sum = 0.0f;
++    for (uint32_t base = lane * PREPARE_NORM_GRAIN; base < head_dim; base += METAL_SIMD_SIZE * PREPARE_NORM_GRAIN) {
++      float vals[PREPARE_NORM_GRAIN];
++      for (uint32_t j = 0; j < PREPARE_NORM_GRAIN; ++j) {
++        const uint32_t i = base + j;
++        vals[j] = i < head_dim ? static_cast<float>(head[i]) : 0.0f;
++      }
++      for (uint32_t j = 0; j < PREPARE_NORM_GRAIN; ++j) {
++        partial_sum += vals[j] * vals[j];
++      }
++    }
++    const float total_sum = simd_sum(partial_sum);
++    const float mean_square = sum_reduction ? total_sum : total_sum / static_cast<float>(head_dim);
++    rms = rsqrt(mean_square + epsilon);
++  }
++
++  for (uint32_t base = lane * PREPARE_NORM_GRAIN; base < head_dim; base += METAL_SIMD_SIZE * PREPARE_NORM_GRAIN) {
++    for (uint32_t j = 0; j < PREPARE_NORM_GRAIN; ++j) {
++      const uint32_t i = base + j;
++      if (i >= head_dim) {
++        continue;
++      }
++      ElementT element = normalized ? prepare_norm_value(head, norm_scales, i, rms, scale_offset, has_norm_scales, full_layer) : head[i];
++      if (has_rope && i < rope_dim && normalized) {
++        const uint32_t half_rope_dim = rope_dim / 2;
++        const uint32_t paired_index = i < half_rope_dim ? i + half_rope_dim : i - half_rope_dim;
++        const float paired =
++            static_cast<float>(prepare_norm_value(head, norm_scales, paired_index, rms, scale_offset, has_norm_scales, full_layer));
++        const float signed_paired = i < half_rope_dim ? -paired : paired;
++        const float cos_val = static_cast<float>(cosines[batch_idx * rope_dim + i]);
++        const float sin_val = static_cast<float>(sines[batch_idx * rope_dim + i]);
++        element = static_cast<ElementT>(static_cast<float>(element) * cos_val + signed_paired * sin_val);
++      }
++      if (is_query && has_query_scales) {
++        element = static_cast<ElementT>(static_cast<float>(element) * query_scales[head_idx * head_dim + i]);
++      }
++      if (is_query) {
++        queries[head_idx * batch_dim * head_dim + batch_idx * head_dim + i] = element;
++      } else if (is_key) {
++        keys[(kv_token_offset + batch_idx) * num_kv_heads * head_dim + (head_idx - num_q_heads) * head_dim + i] =
++            element;
++      } else if (has_kv) {
++        values
++            [(kv_token_offset + batch_idx) * num_kv_heads * head_dim + (head_idx - num_q_heads - num_kv_heads) * head_dim +
++             i] = element;
++      }
++    }
++  }
++}
+diff --git a/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mod.rs b/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mod.rs
+index 2c55cde2..7dbd7162 100644
+--- a/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mod.rs
++++ b/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mod.rs
+@@ -6,7 +6,7 @@ use crate::{
+         Backend, CommandBuffer, CommandBufferEncoding, Kernels,
+         kernel::{
+             AttentionKernel, AttentionKernelConfig, AttentionPrepareInt8Kernel, AttentionPrepareKernel,
+-            NgptGateNormKernel, ScaleColumnsKernel,
++            AttentionPrepareNormKernel, NgptGateNormKernel, ScaleColumnsKernel,
+         },
+     },
+     config::{rope::AnyRoPEConfig, token_mixer::attention::AttentionConfig},
+@@ -51,6 +51,8 @@ pub struct Attention<B: Backend> {
+     projection_dim: u32,
+     projection: LinearProjection<B>,
+     prepare: <B::Kernels as Kernels>::AttentionPrepareKernel,
++    /// The query and key norms inside the prepare, with BF16 KV (the projection then skips `QKVNorm`).
++    prepare_norm: Option<<B::Kernels as Kernels>::AttentionPrepareNormKernel>,
+     prepare_int8: Option<<B::Kernels as Kernels>::AttentionPrepareInt8Kernel>,
+     sinks: Option<B::GlobalBuffer>,
+     kernel: <B::Kernels as Kernels>::AttentionKernel,
+@@ -242,6 +244,24 @@ impl<B: Backend> Attention<B> {
+         // is measured (`OMEGA_INT8_KV=1`).
+         let use_int8_kv = kernel.supports_int8()
+             && (query_scales.is_none() || std::env::var_os("OMEGA_INT8_KV").is_some_and(|value| value != "0"));
++        let prepare_norm = (!use_int8_kv)
++            .then(|| qkv_norm.fused_prepare_params())
++            .flatten()
++            .map(|params| {
++                <B::Kernels as Kernels>::AttentionPrepareNormKernel::new(
++                    context,
++                    data_type,
++                    DataType::F32,
++                    !is_kv_sharing,
++                    rope_config.is_some(),
++                    query_scales.is_some(),
++                    params.full_layer,
++                    params.sum_reduction,
++                    params.query_scales.is_some(),
++                )
++            })
++            .transpose()
++            .map_err(AttentionNewError::Backend)?;
+         let prepare_int8 = use_int8_kv
+             .then(|| {
+                 <B::Kernels as Kernels>::AttentionPrepareInt8Kernel::new(
+@@ -284,6 +304,7 @@ impl<B: Backend> Attention<B> {
+                     norm: qkv_norm,
+                 },
+                 prepare,
++                prepare_norm,
+                 prepare_int8,
+                 sinks,
+                 kernel,
+diff --git a/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mode.rs b/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mode.rs
+index 775ae35b..2395222b 100644
+--- a/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mode.rs
++++ b/engine/crates/uzu-engine/src/encodable_block/mixer/attention/mode.rs
+@@ -1,9 +1,9 @@
+ use crate::{
+     backends::common::{
+-        Backend, Buffer, BufferMut, BufferRef, CommandBuffer, CommandBufferEncoding,
++        Backend, Buffer, BufferMut, BufferRef, CommandBuffer, CommandBufferEncoding, Kernels,
+         kernel::{
+             AttentionArguments, AttentionInput, AttentionKernel, AttentionPrepareInt8Kernel, AttentionPrepareKernel,
+-            FullPrecisionInput, Int8Input, NgptGateNormKernel, ScaleColumnsKernel,
++            AttentionPrepareNormKernel, FullPrecisionInput, Int8Input, NgptGateNormKernel, ScaleColumnsKernel,
+         },
+     },
+     data_type::DataType,
+@@ -45,14 +45,18 @@ pub(super) struct LinearProjection<B: Backend> {
+ }
+ 
+ impl<B: Backend> LinearProjection<B> {
++    /// The projection, normalized unless the prepare applies the norms (`apply_norm` false).
+     fn project(
+         &self,
+         hidden: B::ScratchBuffer,
+         batch_dim: u32,
++        apply_norm: bool,
+         command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+     ) -> Result<B::ScratchBuffer, AttentionEncodeError<B>> {
+         let mut projected = self.lin.encode(hidden, batch_dim, command_buffer)?;
+-        self.norm.encode(&mut projected, batch_dim, command_buffer);
++        if apply_norm {
++            self.norm.encode(&mut projected, batch_dim, command_buffer);
++        }
+         Ok(projected)
+     }
+ }
+@@ -66,7 +70,8 @@ impl<B: Backend> Attention<B> {
+         state: Option<MaybeMut<AttentionState<B>>>,
+         command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
+     ) -> Result<B::ScratchBuffer, AttentionEncodeError<B>> {
+-        let mut qkvg = self.projection.project(hidden, batch_dim.size(), command_buffer)?;
++        let mut qkvg =
++            self.projection.project(hidden, batch_dim.size(), self.prepare_norm.is_none(), command_buffer)?;
+         let q_dim = self.num_q_heads * self.head_dim;
+         let gate_offset = (self.projection_dim - q_dim) as usize * self.data_type.size_in_bytes();
+         if let (Some((gate_scales, scale_columns)), None) = (&self.gate_scales, &self.fused_gate_norm) {
+@@ -146,8 +151,18 @@ impl<B: Backend> Attention<B> {
+                 keys,
+                 values,
+             } => {
+-                queries = self
+-                    .prepare_bf16(
++                queries = match &self.prepare_norm {
++                    Some(prepare_norm) => self.prepare_bf16_normed(
++                        prepare_norm,
++                        qkvg,
++                        keys,
++                        values,
++                        cache.prefix_len(),
++                        precalculated_rope,
++                        batch_dim.size(),
++                        command_buffer,
++                    ),
++                    None => self.prepare_bf16(
+                         qkvg,
+                         keys,
+                         values,
+@@ -156,8 +171,9 @@ impl<B: Backend> Attention<B> {
+                         precalculated_rope,
+                         batch_dim.size(),
+                         command_buffer,
+-                    )
+-                    .map_err(AttentionEncodeError::Backend)?;
++                    ),
++                }
++                .map_err(AttentionEncodeError::Backend)?;
+                 AttentionInput::FullPrecision(FullPrecisionInput {
+                     queries: &queries,
+                     keys: &**keys,
+@@ -255,7 +271,7 @@ impl<B: Backend> Attention<B> {
+             "row groups apply the gate after attention, which needs the fused gate norm"
+         );
+         let rows = groups.iter().map(|group| group.batch_dim.size()).sum::<u32>();
+-        let qkvg = self.projection.project(hidden, rows, command_buffer)?;
++        let qkvg = self.projection.project(hidden, rows, self.prepare_norm.is_none(), command_buffer)?;
+         let q_dim = self.num_q_heads * self.head_dim;
+         let gate_offset = (self.projection_dim - q_dim) as usize * self.data_type.size_in_bytes();
+         let qkvg_row_bytes = self.projection_dim as usize * self.data_type.size_in_bytes();
+@@ -366,6 +382,53 @@ impl<B: Backend> Attention<B> {
+         Ok(queries)
+     }
+ 
++    /// `prepare_bf16` on an unnormalized projection: the query and key norms run inside the prepare.
++    fn prepare_bf16_normed(
++        &self,
++        prepare_norm: &<B::Kernels as Kernels>::AttentionPrepareNormKernel,
++        qkvg: impl BufferRef<Backend = B>,
++        keys: &mut MaybeMut<'_, dyn Buffer<Backend = B>>,
++        values: &mut MaybeMut<'_, dyn Buffer<Backend = B>>,
++        kv_token_offset: u32,
++        rope: Option<&PrecalculatedRoPE<B>>,
++        suffix_length: u32,
++        command_buffer: &mut <B::CommandBuffer as CommandBuffer>::Encoding,
++    ) -> Result<B::ScratchBuffer, B::Error> {
++        let params = self.projection.norm.fused_prepare_params().expect("the fused prepare has norm parameters");
++        let (output_keys, output_values) = match (keys, values) {
++            (MaybeMut::Mut(keys), MaybeMut::Mut(values)) => (Some(&mut **keys), Some(&mut **values)),
++            _ => (None, None),
++        };
++        let append_kv = output_keys.is_some();
++        let query_count = self.num_q_heads as usize * suffix_length as usize;
++        let mut queries = command_buffer
++            .allocate_scratch((query_count * self.head_dim as usize).max(1) * self.data_type.size_in_bytes())?;
++        prepare_norm.encode(
++            qkvg,
++            &mut queries,
++            output_keys,
++            output_values,
++            rope.map(|rope| &rope.cosines),
++            rope.map(|rope| &rope.sines),
++            self.query_scales.as_ref(),
++            params.query_scales,
++            params.key_scales,
++            self.num_q_heads,
++            append_kv.then_some(self.num_groups),
++            self.head_dim,
++            rope.map(|rope| rope.dim),
++            append_kv.then_some(kv_token_offset),
++            self.projection_dim,
++            suffix_length,
++            params.query_epsilon,
++            params.key_epsilon,
++            params.query_scale_offset,
++            params.key_scale_offset,
++            command_buffer,
++        );
++        Ok(queries)
++    }
++
+     fn prepare_int8(
+         &self,
+         qkvg: impl BufferRef<Backend = B>,
+diff --git a/engine/crates/uzu-engine/src/encodable_block/mixer/attention/qkv_norm.rs b/engine/crates/uzu-engine/src/encodable_block/mixer/attention/qkv_norm.rs
+index 9923b8a2..6b55c5fb 100644
+--- a/engine/crates/uzu-engine/src/encodable_block/mixer/attention/qkv_norm.rs
++++ b/engine/crates/uzu-engine/src/encodable_block/mixer/attention/qkv_norm.rs
+@@ -25,6 +25,19 @@ struct Head<B: Backend> {
+     config: NormalizationConfig,
+ }
+ 
++/// Query and key norm parameters for `AttentionPrepareNorm`, which applies both norms inside the prepare.
++pub(super) struct FusedNormParams<'a, B: Backend> {
++    /// Both present or both absent (nGPT's unit norms).
++    pub query_scales: Option<&'a B::GlobalBuffer>,
++    pub key_scales: Option<&'a B::GlobalBuffer>,
++    pub query_epsilon: f32,
++    pub key_epsilon: f32,
++    pub query_scale_offset: f32,
++    pub key_scale_offset: f32,
++    pub full_layer: bool,
++    pub sum_reduction: bool,
++}
++
+ pub struct QKVNorm<B: Backend> {
+     query: Option<Head<B>>,
+     key: Option<Head<B>>,
+@@ -89,6 +102,31 @@ impl<B: Backend> QKVNorm<B> {
+         })
+     }
+ 
++    /// The fused prepare covers query and key norms with the same upcast mode and reduction, both scaled or
++    /// both unscaled, and no value norm.
++    pub(super) fn fused_prepare_params(&self) -> Option<FusedNormParams<'_, B>> {
++        let (Some(query), Some(key), None) = (&self.query, &self.key, &self.value) else {
++            return None;
++        };
++        if query.scales.is_some() != key.scales.is_some() {
++            return None;
++        }
++        let full_layer = query.config.upcast_mode == UpcastMode::FullLayer;
++        let sum_reduction = query.config.reduction == NormReduction::Sum;
++        let same_mode = full_layer == (key.config.upcast_mode == UpcastMode::FullLayer)
++            && sum_reduction == (key.config.reduction == NormReduction::Sum);
++        (same_mode && self.num_kv_heads.is_some()).then(|| FusedNormParams {
++            query_scales: query.scales.as_ref(),
++            key_scales: key.scales.as_ref(),
++            query_epsilon: query.config.epsilon,
++            key_epsilon: key.config.epsilon,
++            query_scale_offset: query.config.scale_offset.unwrap_or(0.0),
++            key_scale_offset: key.config.scale_offset.unwrap_or(0.0),
++            full_layer,
++            sum_reduction,
++        })
++    }
++
+     pub fn encode(
+         &self,
+         qkvg: impl BufferMut<Backend = B>,
+diff --git a/engine/crates/uzu-engine/unit/backends/common/kernel/attention/attention_prepare_test.rs b/engine/crates/uzu-engine/unit/backends/common/kernel/attention/attention_prepare_test.rs
+index 09f1fee6..c89c3093 100644
+--- a/engine/crates/uzu-engine/unit/backends/common/kernel/attention/attention_prepare_test.rs
++++ b/engine/crates/uzu-engine/unit/backends/common/kernel/attention/attention_prepare_test.rs
+@@ -224,3 +224,190 @@ fn test_attention_prepare_int8() {
+     assert_ne!((&plain.codes[0], &plain.scales[0]), (&scaled.codes[0], &scaled.scales[0]));
+     assert_eq!((&plain.codes[1..], &plain.scales[1..]), (&scaled.codes[1..], &scaled.scales[1..]));
+ }
++
++const NORM_Q_HEADS: u32 = 4;
++const NORM_KV_HEADS: u32 = 2;
++const NORM_HEAD_DIM: u32 = 256;
++const NORM_ROPE_DIM: u32 = 64;
++const NORM_ROWS: u32 = 2;
++// Query, key and value heads, then a gate as wide as the queries.
++const NORM_ROW_STRIDE: u32 = (2 * NORM_Q_HEADS + 2 * NORM_KV_HEADS) * NORM_HEAD_DIM;
++
++struct NormInputs {
++    qkvg: Vec<bf16>,
++    query_norm_scales: Vec<f32>,
++    key_norm_scales: Vec<f32>,
++    query_scales: Vec<f32>,
++    cosines: Vec<f32>,
++    sines: Vec<f32>,
++}
++
++fn norm_inputs() -> NormInputs {
++    let wave = |seed: f32, count: u32| -> Vec<f32> {
++        (0..count).map(|index| (index as f32 * 0.37 + seed).sin() * 1.7 + (index as f32 * 0.011).cos()).collect()
++    };
++    NormInputs {
++        qkvg: wave(0.3, NORM_ROWS * NORM_ROW_STRIDE).into_iter().map(bf16::from_f32).collect(),
++        query_norm_scales: wave(1.1, NORM_HEAD_DIM).into_iter().map(|value| 0.5 + 0.2 * value).collect(),
++        key_norm_scales: wave(2.3, NORM_HEAD_DIM).into_iter().map(|value| 0.4 + 0.2 * value).collect(),
++        query_scales: wave(3.7, NORM_Q_HEADS * NORM_HEAD_DIM).into_iter().map(|value| 1.0 + 0.3 * value).collect(),
++        cosines: wave(4.1, NORM_ROWS * NORM_ROPE_DIM).into_iter().map(f32::cos).collect(),
++        sines: wave(4.1, NORM_ROWS * NORM_ROPE_DIM).into_iter().map(f32::sin).collect(),
++    }
++}
++
++/// Queries, keys and values from QKVNorm (query and key heads, in place) then AttentionPrepare, or from
++/// AttentionPrepareNorm alone. Without `norm_scales` both norms are unscaled (nGPT).
++fn run_prepare_norm<B: Backend>(
++    inputs: &NormInputs,
++    fused: bool,
++    full_layer: bool,
++    append_kv: bool,
++    norm_scales: bool,
++) -> Output {
++    use crate::backends::common::kernel::{AttentionPrepareNormKernel, QKVNormKernel};
++    let context = block_on(B::Context::new()).expect("context");
++    let mut qkvg = create_buffer_with_data::<B, bf16>(&context, &inputs.qkvg);
++    let query_norm_scales = create_buffer_with_data::<B, f32>(&context, &inputs.query_norm_scales);
++    let key_norm_scales = create_buffer_with_data::<B, f32>(&context, &inputs.key_norm_scales);
++    let query_scales = create_buffer_with_data::<B, f32>(&context, &inputs.query_scales);
++    let cosines = create_buffer_with_data::<B, f32>(&context, &inputs.cosines);
++    let sines = create_buffer_with_data::<B, f32>(&context, &inputs.sines);
++    let zeros = |count: u32| vec![bf16::ZERO; count as usize];
++    let mut queries = create_buffer_with_data::<B, bf16>(&context, &zeros(NORM_ROWS * NORM_Q_HEADS * NORM_HEAD_DIM));
++    let kv_len = (3 + NORM_ROWS) * NORM_KV_HEADS * NORM_HEAD_DIM;
++    let mut keys = create_buffer_with_data::<B, bf16>(&context, &zeros(kv_len));
++    let mut values = create_buffer_with_data::<B, bf16>(&context, &zeros(kv_len));
++    let (epsilons, offsets) = ([1e-6f32, 2e-6], [0.0f32, 0.25]);
++    let mut command_buffer = context.create_command_buffer(None, None).expect("command buffer");
++    if fused {
++        let kernel = <<B as Backend>::Kernels as Kernels>::AttentionPrepareNormKernel::new(
++            &context,
++            DataType::BF16,
++            DataType::F32,
++            append_kv,
++            true,
++            true,
++            full_layer,
++            true,
++            norm_scales,
++        )
++        .expect("prepare norm kernel");
++        kernel.encode(
++            &qkvg,
++            &mut queries,
++            append_kv.then_some(&mut keys),
++            append_kv.then_some(&mut values),
++            Some(&cosines),
++            Some(&sines),
++            Some(&query_scales),
++            norm_scales.then_some(&query_norm_scales),
++            norm_scales.then_some(&key_norm_scales),
++            NORM_Q_HEADS,
++            append_kv.then_some(NORM_KV_HEADS),
++            NORM_HEAD_DIM,
++            Some(NORM_ROPE_DIM),
++            append_kv.then_some(3),
++            NORM_ROW_STRIDE,
++            NORM_ROWS,
++            epsilons[0],
++            epsilons[1],
++            offsets[0],
++            offsets[1],
++            &mut command_buffer,
++        );
++    } else {
++        let norm = <<B as Backend>::Kernels as Kernels>::QKVNormKernel::new(
++            &context,
++            DataType::BF16,
++            DataType::F32,
++            DataType::BF16,
++            DataType::F32,
++            true,
++            norm_scales,
++        )
++        .expect("QKV norm kernel");
++        for (scales, epsilon, offset, head_offset, head_count) in [
++            (&query_norm_scales, epsilons[0], offsets[0], 0, NORM_Q_HEADS),
++            (&key_norm_scales, epsilons[1], offsets[1], NORM_Q_HEADS, NORM_KV_HEADS),
++        ] {
++            norm.encode(
++                None::<&B::GlobalBuffer>,
++                norm_scales.then_some(scales),
++                &mut qkvg,
++                NORM_ROWS,
++                NORM_ROW_STRIDE,
++                NORM_HEAD_DIM,
++                epsilon,
++                offset,
++                head_offset,
++                head_count,
++                full_layer,
++                true,
++                &mut command_buffer,
++            );
++        }
++        let prepare = <<B as Backend>::Kernels as Kernels>::AttentionPrepareKernel::new(
++            &context,
++            DataType::BF16,
++            DataType::F32,
++            append_kv,
++            true,
++            true,
++        )
++        .expect("prepare kernel");
++        prepare.encode(
++            &qkvg,
++            &mut queries,
++            append_kv.then_some(&mut keys),
++            append_kv.then_some(&mut values),
++            Some(&cosines),
++            Some(&sines),
++            Some(&query_scales),
++            NORM_Q_HEADS,
++            append_kv.then_some(NORM_KV_HEADS),
++            NORM_HEAD_DIM,
++            Some(NORM_ROPE_DIM),
++            append_kv.then_some(3),
++            NORM_ROW_STRIDE,
++            NORM_ROWS,
++            &mut command_buffer,
++        );
++    }
++    block_on(command_buffer.end_encoding().submit().wait_until_completed()).expect("wait");
++    Output {
++        queries: buffer_to_vec(&queries),
++        keys: buffer_to_vec(&keys),
++        values: buffer_to_vec(&values),
++    }
++}
++
++/// The fused prepare writes exactly what QKVNorm followed by AttentionPrepare writes, on every backend.
++#[uzu_test]
++fn test_attention_prepare_norm_matches_norm_then_prepare() {
++    let inputs = norm_inputs();
++    // The last two cases are Dory's (unscaled nGPT norms).
++    for (full_layer, append_kv, norm_scales) in
++        [(true, true, true), (false, true, true), (true, false, true), (true, true, false), (false, true, false)]
++    {
++        let check = |separate: Output, fused: Output, backend: &str| {
++            let case = format!("{backend}, full layer {full_layer}, append KV {append_kv}, norm scales {norm_scales}");
++            assert_eq!(separate.queries, fused.queries, "queries differ on {case}");
++            assert_eq!(separate.keys, fused.keys, "keys differ on {case}");
++            assert_eq!(separate.values, fused.values, "values differ on {case}");
++            assert!(separate.queries.iter().any(|value| value.to_f32() != 0.0), "no queries written on {case}");
++        };
++        check(
++            run_prepare_norm::<Cpu>(&inputs, false, full_layer, append_kv, norm_scales),
++            run_prepare_norm::<Cpu>(&inputs, true, full_layer, append_kv, norm_scales),
++            "Cpu",
++        );
++        for_each_non_cpu_backend!(|B| {
++            check(
++                run_prepare_norm::<B>(&inputs, false, full_layer, append_kv, norm_scales),
++                run_prepare_norm::<B>(&inputs, true, full_layer, append_kv, norm_scales),
++                std::any::type_name::<B>(),
++            );
++        });
++    }
++}

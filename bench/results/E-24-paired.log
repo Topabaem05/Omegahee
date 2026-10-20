@@ -1,0 +1,61 @@
+# E-24 paired A/B (2026-10-20 18:09-19:25 KST), base = a4ba35e5, e24 = base + E-24-fused-prepare-norm.patch
+# Model Dory1.0-4B-nvfp4-r4-fp8s, omega_bench --runs 3 (first run dropped), ABBA blocks, --cooldown-timeout 60.
+# Another session's MPS training shared the GPU the whole time (clean 2K wavefront is 91.35 tok/s); CPU idle min/median per run shown.
+
+wf2k block 1 base idle(min/median) 85.64/91.48 | E-24-base-wf2k-b1 L2 per_loop prompt_2048.json: decode 48.78 [48.14, 49.67] tok/s, upper 99.3, efficiency 49.1%, prefill 754 tok/s
+wf2k block 1 e24 idle(min/median) 87.10/91.58 | E-24-e24-wf2k-b1 L2 per_loop prompt_2048.json: decode 48.44 [47.76, 63.39] tok/s, upper 99.3, efficiency 48.8%, prefill 621 tok/s
+wf2k block 1 e24 idle(min/median) 67.59/85.99 | E-24-e24-wf2k-b1 L2 per_loop prompt_2048.json: decode 49.32 [48.60, 51.88] tok/s, upper 99.3, efficiency 49.7%, prefill 632 tok/s
+wf2k block 1 base idle(min/median) 75.88/84.31 | E-24-base-wf2k-b1 L2 per_loop prompt_2048.json: decode 48.51 [48.12, 62.08] tok/s, upper 99.3, efficiency 48.9%, prefill 614 tok/s
+wf2k block 2 base idle(min/median) 71.15/83.74 | E-24-base-wf2k-b2 L2 per_loop prompt_2048.json: decode 49.57 [49.27, 52.90] tok/s, upper 99.3, efficiency 49.9%, prefill 644 tok/s
+wf2k block 2 e24 idle(min/median) 80.31/89.80 | E-24-e24-wf2k-b2 L2 per_loop prompt_2048.json: decode 48.48 [48.07, 63.36] tok/s, upper 99.3, efficiency 48.8%, prefill 621 tok/s
+wf2k block 2 e24 idle(min/median) 55.18/81.42 | E-24-e24-wf2k-b2 L2 per_loop prompt_2048.json: decode 47.40 [46.85, 58.56] tok/s, upper 99.3, efficiency 47.7%, prefill 632 tok/s
+wf2k block 2 base idle(min/median) 58.84/65.28 | E-24-base-wf2k-b2 L2 per_loop prompt_2048.json: decode 47.75 [46.71, 47.85] tok/s, upper 99.3, efficiency 48.1%, prefill 736 tok/s
+wf2k block 3 base idle(min/median) 59.20/65.88 | E-24-base-wf2k-b3 L2 per_loop prompt_2048.json: decode 48.23 [47.63, 50.20] tok/s, upper 99.3, efficiency 48.6%, prefill 656 tok/s
+wf2k block 3 e24 idle(min/median) 41.14/61.68 | E-24-e24-wf2k-b3 L2 per_loop prompt_2048.json: decode 47.05 [46.16, 47.57] tok/s, upper 99.3, efficiency 47.4%, prefill 772 tok/s
+wf2k block 3 e24 idle(min/median) 55.13/87.90 | E-24-e24-wf2k-b3 L2 per_loop prompt_2048.json: decode 49.08 [49.06, 52.95] tok/s, upper 99.3, efficiency 49.4%, prefill 711 tok/s
+wf2k block 3 base idle(min/median) 78.61/89.94 | E-24-base-wf2k-b3 L2 per_loop prompt_2048.json: decode 46.99 [40.29, 47.94] tok/s, upper 99.3, efficiency 47.3%, prefill 707 tok/s
+wf2k block 4 base idle(min/median) 63.26/90.94 | E-24-base-wf2k-b4 L2 per_loop prompt_2048.json: decode 48.40 [48.14, 55.87] tok/s, upper 99.3, efficiency 48.7%, prefill 614 tok/s
+wf2k block 4 e24 idle(min/median) 67.41/91.18 | E-24-e24-wf2k-b4 L2 per_loop prompt_2048.json: decode 47.81 [43.88, 48.60] tok/s, upper 99.3, efficiency 48.2%, prefill 645 tok/s
+wf2k block 4 e24 idle(min/median) 66.15/90.20 | E-24-e24-wf2k-b4 L2 per_loop prompt_2048.json: decode 47.36 [43.98, 52.97] tok/s, upper 99.3, efficiency 47.7%, prefill 686 tok/s
+wf2k block 4 base idle(min/median) 84.11/91.88 | E-24-base-wf2k-b4 L2 per_loop prompt_2048.json: decode 48.85 [46.58, 50.45] tok/s, upper 99.3, efficiency 49.2%, prefill 778 tok/s
+wf2k block 5 base idle(min/median) 87.86/92.50 | E-24-base-wf2k-b5 L2 per_loop prompt_2048.json: decode 46.63 [45.53, 53.86] tok/s, upper 99.3, efficiency 47.0%, prefill 613 tok/s
+wf2k block 5 e24 idle(min/median) 73.58/91.72 | E-24-e24-wf2k-b5 L2 per_loop prompt_2048.json: decode 48.85 [47.61, 53.33] tok/s, upper 99.3, efficiency 49.2%, prefill 627 tok/s
+wf2k block 5 e24 idle(min/median) 83.68/91.93 | E-24-e24-wf2k-b5 L2 per_loop prompt_2048.json: decode 49.20 [49.18, 54.45] tok/s, upper 99.3, efficiency 49.6%, prefill 626 tok/s
+wf2k block 5 base idle(min/median) 85.96/92.4 | E-24-base-wf2k-b5 L2 per_loop prompt_2048.json: decode 50.10 [49.58, 52.90] tok/s, upper 99.3, efficiency 50.5%, prefill 669 tok/s
+wf2k block 6 base idle(min/median) 77.60/92.12 | E-24-base-wf2k-b6 L2 per_loop prompt_2048.json: decode 48.22 [47.13, 49.08] tok/s, upper 99.3, efficiency 48.6%, prefill 706 tok/s
+wf2k block 6 e24 idle(min/median) 73.81/92.55 | E-24-e24-wf2k-b6 L2 per_loop prompt_2048.json: decode 48.39 [43.68, 52.43] tok/s, upper 99.3, efficiency 48.7%, prefill 729 tok/s
+wf2k block 6 e24 idle(min/median) 87.45/92.40 | E-24-e24-wf2k-b6 L2 per_loop prompt_2048.json: decode 48.91 [47.08, 53.80] tok/s, upper 99.3, efficiency 49.3%, prefill 743 tok/s
+wf2k block 6 base idle(min/median) 87.24/92.39 | E-24-base-wf2k-b6 L2 per_loop prompt_2048.json: decode 49.87 [49.58, 52.75] tok/s, upper 99.3, efficiency 50.2%, prefill 713 tok/s
+seq2k block 1 base idle(min/median) 74.44/91.8 | E-24-base-seq2k-b1 L2 per_loop prompt_2048.json: decode 38.53 [37.75, 40.32] tok/s, upper 99.3, efficiency 38.8%, prefill 619 tok/s
+seq2k block 1 e24 idle(min/median) 71.75/91.26 | E-24-e24-seq2k-b1 L2 per_loop prompt_2048.json: decode 37.56 [37.54, 42.27] tok/s, upper 99.3, efficiency 37.8%, prefill 615 tok/s
+seq2k block 1 e24 idle(min/median) 86.92/91.89 | E-24-e24-seq2k-b1 L2 per_loop prompt_2048.json: decode 36.47 [33.95, 40.35] tok/s, upper 99.3, efficiency 36.7%, prefill 710 tok/s
+seq2k block 1 base idle(min/median) 77.54/92.0 | E-24-base-seq2k-b1 L2 per_loop prompt_2048.json: decode 35.31 [33.76, 38.20] tok/s, upper 99.3, efficiency 35.6%, prefill 678 tok/s
+seq2k block 2 base idle(min/median) 85.40/92.23 | E-24-base-seq2k-b2 L2 per_loop prompt_2048.json: decode 35.91 [35.27, 40.74] tok/s, upper 99.3, efficiency 36.2%, prefill 669 tok/s
+seq2k block 2 e24 idle(min/median) 78.57/91.71 | E-24-e24-seq2k-b2 L2 per_loop prompt_2048.json: decode 39.61 [39.43, 40.27] tok/s, upper 99.3, efficiency 39.9%, prefill 688 tok/s
+seq2k block 2 e24 idle(min/median) 73.95/91.71 | E-24-e24-seq2k-b2 L2 per_loop prompt_2048.json: decode 39.22 [39.01, 41.43] tok/s, upper 99.3, efficiency 39.5%, prefill 635 tok/s
+seq2k block 2 base idle(min/median) 86.61/92.2 | E-24-base-seq2k-b2 L2 per_loop prompt_2048.json: decode 37.30 [34.66, 40.20] tok/s, upper 99.3, efficiency 37.6%, prefill 618 tok/s
+wf16k block 1 base idle(min/median) 87.67/92.88 | E-24-base-wf16k-b1 L2 per_loop prompt_16384.json: decode 38.76 [36.67, 39.97] tok/s, upper 99.3, efficiency 39.0%, prefill 602 tok/s
+wf16k block 1 e24 idle(min/median) 76.48/92.46 | E-24-e24-wf16k-b1 L2 per_loop prompt_16384.json: decode 34.19 [34.09, 42.38] tok/s, upper 99.3, efficiency 34.4%, prefill 606 tok/s
+wf16k block 1 e24 idle(min/median) 60.53/90.89 | E-24-e24-wf16k-b1 L2 per_loop prompt_16384.json: decode 35.84 [33.91, 39.02] tok/s, upper 99.3, efficiency 36.1%, prefill 601 tok/s
+wf16k block 1 base idle(min/median) 61.55/66.64 | E-24-base-wf16k-b1 L2 per_loop prompt_16384.json: decode 35.86 [32.59, 36.79] tok/s, upper 99.3, efficiency 36.1%, prefill 583 tok/s
+wf16k block 2 base idle(min/median) 55.54/66.62 | E-24-base-wf16k-b2 L2 per_loop prompt_16384.json: decode 34.55 [33.42, 34.66] tok/s, upper 99.3, efficiency 34.8%, prefill 568 tok/s
+wf16k block 2 e24 idle(min/median) 60.37/66.72 | E-24-e24-wf16k-b2 L2 per_loop prompt_16384.json: decode 36.44 [35.44, 37.85] tok/s, upper 99.3, efficiency 36.7%, prefill 584 tok/s
+wf16k block 2 e24 idle(min/median) 59.63/66.89 | E-24-e24-wf16k-b2 L2 per_loop prompt_16384.json: decode 37.38 [36.23, 38.95] tok/s, upper 99.3, efficiency 37.6%, prefill 586 tok/s
+wf16k block 2 base idle(min/median) 57.19/63.27 | E-24-base-wf16k-b2 L2 per_loop prompt_16384.json: decode 35.92 [33.65, 40.14] tok/s, upper 99.3, efficiency 36.2%, prefill 586 tok/s
+wf128 block 1 base idle(min/median) 62.13/91.41 | E-24-base-wf128-b1 L2 per_loop prompt_128.json: decode 43.17 [42.86, 43.38] tok/s, upper 99.3, efficiency 43.5%, prefill 249 tok/s
+wf128 block 1 e24 idle(min/median) 76.83/91.73 | E-24-e24-wf128-b1 L2 per_loop prompt_128.json: decode 44.04 [43.21, 44.18] tok/s, upper 99.3, efficiency 44.4%, prefill 245 tok/s
+wf128 block 1 e24 idle(min/median) 85.0/92.0 | E-24-e24-wf128-b1 L2 per_loop prompt_128.json: decode 46.14 [43.81, 48.61] tok/s, upper 99.3, efficiency 46.5%, prefill 247 tok/s
+wf128 block 1 base idle(min/median) 85.57/91.78 | E-24-base-wf128-b1 L2 per_loop prompt_128.json: decode 43.41 [42.79, 44.50] tok/s, upper 99.3, efficiency 43.7%, prefill 248 tok/s
+wf128 block 2 base idle(min/median) 85.5/92.0 | E-24-base-wf128-b2 L2 per_loop prompt_128.json: decode 47.00 [44.18, 50.98] tok/s, upper 99.3, efficiency 47.3%, prefill 316 tok/s
+wf128 block 2 e24 idle(min/median) 85.99/91.52 | E-24-e24-wf128-b2 L2 per_loop prompt_128.json: decode 47.80 [45.31, 51.24] tok/s, upper 99.3, efficiency 48.1%, prefill 237 tok/s
+wf128 block 2 e24 idle(min/median) 77.41/92.10 | E-24-e24-wf128-b2 L2 per_loop prompt_128.json: decode 46.03 [44.54, 49.23] tok/s, upper 99.3, efficiency 46.4%, prefill 274 tok/s
+wf128 block 2 base idle(min/median) 86.49/91.75 | E-24-base-wf128-b2 L2 per_loop prompt_128.json: decode 48.97 [43.43, 61.60] tok/s, upper 99.3, efficiency 49.3%, prefill 224 tok/s
+
+# Analysis (e24/base ratio of block means, 95% t interval)
+wf2k: blocks 6, base median 48.45, e24 median 48.46, e24/base per block 1.005 0.985 1.010 0.979 1.014 0.992, mean 0.9973 (±0.0148 95% t, df 5), e24 faster in 3/6
+seq2k: blocks 2, base median 36.60, e24 median 38.39, e24/base per block 1.003 1.077, mean 1.0397 (±0.4713 95% t, df 1), e24 faster in 2/2
+wf16k: blocks 2, base median 35.89, e24 median 36.14, e24/base per block 0.938 1.048, mean 0.9930 (±0.6928 95% t, df 1), e24 faster in 1/2
+wf128: blocks 2, base median 45.20, e24 median 46.09, e24/base per block 1.042 0.978, mean 1.0096 (±0.4058 95% t, df 1), e24 faster in 1/2
+prompt_128.json: generated text identical across arms: True (1 distinct base texts)
+prompt_16384.json: generated text identical across arms: True (1 distinct base texts)
+prompt_2048.json: generated text identical across arms: True (1 distinct base texts)
